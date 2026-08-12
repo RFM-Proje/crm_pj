@@ -1,0 +1,177 @@
+/*=============================================================
+  WEEK 3. 군집분석 (핵심 세분화 축)
+  입력: proj.customer_features (2주차 산출물)
+  원칙: CCC는 PROC FASTCLUS 단독으로는 산출되지 않는 계층적
+        군집(PROC CLUSTER) 통계량이므로, SAS 표준 방식인
+        "예비 군집(FASTCLUS) → CCC 기반 K 결정(CLUSTER) →
+        최종 군집(FASTCLUS)" 3단계로 진행한다
+  산출물: proj.customer_segments (Cluster ID 부여된 최종 세그먼트)
+=============================================================*/
+
+libname proj "/home/student/abcdefg/open";
+
+
+/* -------------------------------------------------------------
+   0. 왜도 반영 - 로그변환
+   [결정 근거] week2 보완 2번에서 확인한 Recency/Frequency/
+   Monetary/AvgOrderValue 왜도가 절대값 1 이상으로 나온 변수는
+   PROC STDIZE 단순 표준화만으로는 스케일이 여전히 치우쳐 있어
+   K-Means 거리 계산을 왜곡할 수 있음. Frequency/Monetary는
+   구조적으로 항상 오른쪽 꼬리(소수 고객이 매우 큼)이므로
+   log1p(=log(1+x)) 변환을 기본 적용. 실제 왜도 확인 결과에
+   따라 아래 VAR 목록은 조정 가능
+------------------------------------------------------------- */
+data proj.customer_features_log;
+    set proj.customer_features;
+    Frequency_log = log(1 + Frequency);
+    Monetary_log  = log(1 + Monetary);
+run;
+
+
+/* -------------------------------------------------------------
+   1. PROC STDIZE - RFM 및 파생변수 표준화
+   [존재 이유] K-Means는 유클리드 거리를 기반으로 하므로,
+   단위가 다른 변수(원 단위 Monetary vs 비율 CouponUseRate)를
+   그대로 두면 값이 큰 변수가 거리 계산을 지배함. METHOD=STD로
+   평균0/표준편차1로 맞춰 모든 변수의 기여도를 동등하게 함
+------------------------------------------------------------- */
+proc stdize data=proj.customer_features_log out=proj.customer_features_std method=std;
+    var Recency Frequency_log Monetary_log AvgOrderValue
+        CouponUseRate AvgDiscountRate AvgShipping;
+run;
+
+
+/* -------------------------------------------------------------
+   2단계. 예비 군집 (Preliminary Clustering)
+   [존재 이유] 고객 수가 많을 경우 PROC CLUSTER(계층적 군집)를
+   전체 데이터에 바로 돌리면 계산량이 과도함. SAS 권장 방식대로
+   먼저 FASTCLUS로 다수(예: 50개)의 예비 군집으로 압축한 뒤,
+   그 압축된 군집 평균에 대해 계층적 군집을 수행한다
+------------------------------------------------------------- */
+proc fastclus data=proj.customer_features_std maxclusters=50 maxiter=100
+              out=proj.prelim_out mean=proj.prelim_mean noprint;
+    var Recency Frequency_log Monetary_log AvgOrderValue
+        CouponUseRate AvgDiscountRate AvgShipping;
+run;
+
+
+/* -------------------------------------------------------------
+   2단계. PROC CLUSTER - CCC/Pseudo-F/Pseudo-T² 기반 최적 K 결정
+   [존재 이유] 예비 군집 평균(prelim_mean)에 Ward's method로
+   계층적 군집을 수행하면서, 각 군집수(NCL)별 CCC/Pseudo F/
+   Pseudo T²를 산출. FREQ 문으로 예비 군집의 고객수(_FREQ_)를
+   가중치로 반영해야 원래 고객 분포가 왜곡되지 않음
+------------------------------------------------------------- */
+proc cluster data=proj.prelim_mean method=ward ccc pseudo out=proj.cluster_tree;
+    var Recency Frequency_log Monetary_log AvgOrderValue
+        CouponUseRate AvgDiscountRate AvgShipping;
+    freq _freq_;
+    ods output ClusterHistory=proj.cluster_stats;
+run;
+
+/* CCC/Pseudo-F 추이를 눈으로 확인 - 그래프상 CCC가 급격히
+   꺾이는 지점(피크) 또는 Pseudo-F가 국소 최대인 지점이 후보 K */
+proc sql;
+    select NumberOfClusters, CCC, PseudoF, PseudoT2
+    from proj.cluster_stats
+    where NumberOfClusters between 2 and 10
+    order by NumberOfClusters;
+    title "2. 군집수(K)별 CCC / Pseudo-F / Pseudo-T2 (K=2~10)";
+quit;
+title;
+
+proc sgplot data=proj.cluster_stats;
+    where NumberOfClusters between 2 and 15;
+    series x=NumberOfClusters y=CCC;
+    xaxis label="군집 수(K)";
+    yaxis label="CCC";
+    title "2-1. K별 CCC 추이 (피크 지점이 최적 K 후보)";
+run;
+title;
+
+proc sgplot data=proj.cluster_stats;
+    where NumberOfClusters between 2 and 15;
+    series x=NumberOfClusters y=PseudoF;
+    xaxis label="군집 수(K)";
+    yaxis label="Pseudo F Statistic";
+    title "2-2. K별 Pseudo-F 추이 (국소 최대 지점이 최적 K 후보)";
+run;
+title;
+
+/* -------------------------------------------------------------
+   ※ 여기서 그래프/표를 보고 최적 K를 확정한다 (예: K=4)
+   팀 논의 후 아래 매크로변수를 실제 값으로 수정할 것
+------------------------------------------------------------- */
+%let optimal_k = 4;   /* TODO: 위 CCC/Pseudo-F 결과 보고 확정 */
+
+
+/* -------------------------------------------------------------
+   3단계. 최종 PROC FASTCLUS - 전체 고객 대상 K-Means 확정
+   [존재 이유] 2단계는 예비 군집(50개) 기준의 근사치이므로,
+   확정된 K로 전체 표준화 데이터에 대해 다시 K-Means를 수행해야
+   실제 개별 고객 단위의 정확한 군집 배정(Cluster ID)이 나옴
+------------------------------------------------------------- */
+proc fastclus data=proj.customer_features_std maxclusters=&optimal_k maxiter=100
+              out=proj.customer_clustered;
+    var Recency Frequency_log Monetary_log AvgOrderValue
+        CouponUseRate AvgDiscountRate AvgShipping;
+    title "3. 최종 K-Means 군집화 (K=&optimal_k)";
+run;
+title;
+
+
+/* -------------------------------------------------------------
+   4. 군집별 특성 프로파일링
+   [존재 이유] Cluster ID만으로는 각 군집이 어떤 성격의
+   고객군인지 알 수 없으므로, 원 단위(표준화 이전) RFM 값과
+   인구통계 분포를 군집별로 비교해 세그먼트 이름을 붙일 근거를
+   마련해야 함
+------------------------------------------------------------- */
+
+/* 4-1. Cluster ID를 원본(비표준화) 고객 특성 테이블에 병합 */
+proc sql;
+    create table proj.customer_segments as
+    select a.*, b.cluster as Cluster_ID
+    from proj.customer_features as a
+    left join proj.customer_clustered as b
+        on a.고객ID = b.고객ID;
+quit;
+
+/* 4-2. 군집별 R/F/M 평균 (원 단위 - 해석 용이) */
+proc means data=proj.customer_segments mean std n;
+    class Cluster_ID;
+    var Recency Frequency Monetary AvgOrderValue
+        CouponUseRate AvgDiscountRate AvgShipping;
+    title "4-2. 군집별 RFM 및 파생변수 평균 (원 단위)";
+run;
+title;
+
+/* 4-3. 군집별 지역/성별 분포 */
+proc freq data=proj.customer_segments;
+    tables Cluster_ID * (성별 고객지역) / nocol nopercent;
+    title "4-3. 군집별 성별/지역 분포";
+run;
+title;
+
+/* 4-4. 군집 크기(고객수) 및 비중 */
+proc sql;
+    select Cluster_ID,
+           count(*) as 고객수,
+           count(*) / (select count(*) from proj.customer_segments) * 100 as 비중_pct
+    from proj.customer_segments
+    group by Cluster_ID
+    order by Cluster_ID;
+    title "4-4. 군집별 고객수 및 비중";
+quit;
+title;
+
+
+/* -------------------------------------------------------------
+   5. 최종 산출물 확인
+   proj.customer_segments = 이후 모든 분석(코호트, 연관분석,
+   이탈예측, 대시보드)의 기준이 되는 세그먼트 테이블
+------------------------------------------------------------- */
+proc contents data=proj.customer_segments varnum;
+    title "5. 최종 세그먼트 테이블(customer_segments) 구조";
+run;
+title;
