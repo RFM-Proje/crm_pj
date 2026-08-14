@@ -8,7 +8,7 @@
   산출물: proj.customer_segments (Cluster ID 부여된 최종 세그먼트)
 =============================================================*/
 
-libname proj "/home/student/abcdefg/open";
+libname proj "/home/student/open";
 
 
 /* -------------------------------------------------------------
@@ -58,33 +58,40 @@ run;
 /* -------------------------------------------------------------
    2단계. PROC CLUSTER - CCC/Pseudo-F/Pseudo-T² 기반 최적 K 결정
    [존재 이유] 예비 군집 평균(prelim_mean)에 Ward's method로
-   계층적 군집을 수행하면서, 각 군집수(NCL)별 CCC/Pseudo F/
-   Pseudo T²를 산출. FREQ 문으로 예비 군집의 고객수(_FREQ_)를
-   가중치로 반영해야 원래 고객 분포가 왜곡되지 않음
+   계층적 군집을 수행하면서, 각 군집수(NCL)별 CCC/PSF/PST2를
+   산출. PROC FASTCLUS의 MEAN= 출력 데이터셋에는 _FREQ_,
+   _RMSSTD_ 변수가 이미 자동으로 포함되어 있고, PROC CLUSTER는
+   이를 자동으로 인식해서 통계량 계산에 반영함(SAS 공식 문서/
+   예제 방식). 따라서 FREQ 문을 별도로 명시하지 않는다 -
+   명시적 FREQ 문을 쓰면 CCC/PSF/PST2 통계량 자체가 산출되지
+   않는 오류(컬럼 자체가 생성 안 됨)가 발생할 수 있음
+   ※ ODS output ClusterHistory 테이블의 실제 컬럼명은
+     CCC / PSF / PST2 임 (PseudoF, PseudoT2 아님 - SAS 공식 명칭)
 ------------------------------------------------------------- */
 proc cluster data=proj.prelim_mean method=ward ccc pseudo out=proj.cluster_tree;
     var Recency Frequency_log Monetary_log AvgOrderValue
         CouponUseRate AvgDiscountRate AvgShipping;
-    freq _freq_;
     ods output ClusterHistory=proj.cluster_stats;
 run;
 
-/* CCC/Pseudo-F 추이를 눈으로 확인 - 그래프상 CCC가 급격히
-   꺾이는 지점(피크) 또는 Pseudo-F가 국소 최대인 지점이 후보 K */
+/* CCC/PseudoF 추이를 눈으로 확인 - 그래프상 CCC가 급격히
+   꺾이는 지점(피크) 또는 PseudoF가 국소 최대인 지점이 후보 K
+   ※ proc contents로 실제 확인된 컬럼명: CubicClusCrit(=CCC),
+     PseudoF(=PSF), PseudoTSq(=PST2) */
 proc sql;
-    select NumberOfClusters, CCC, PseudoF, PseudoT2
+    select NumberOfClusters, CubicClusCrit, PseudoF, PseudoTSq
     from proj.cluster_stats
     where NumberOfClusters between 2 and 10
     order by NumberOfClusters;
-    title "2. 군집수(K)별 CCC / Pseudo-F / Pseudo-T2 (K=2~10)";
+    title "2. 군집수(K)별 CCC / PseudoF / PseudoTSq (K=2~10)";
 quit;
 title;
 
 proc sgplot data=proj.cluster_stats;
     where NumberOfClusters between 2 and 15;
-    series x=NumberOfClusters y=CCC;
+    series x=NumberOfClusters y=CubicClusCrit;
     xaxis label="군집 수(K)";
-    yaxis label="CCC";
+    yaxis label="CCC (Cubic Clustering Criterion)";
     title "2-1. K별 CCC 추이 (피크 지점이 최적 K 후보)";
 run;
 title;
@@ -94,7 +101,7 @@ proc sgplot data=proj.cluster_stats;
     series x=NumberOfClusters y=PseudoF;
     xaxis label="군집 수(K)";
     yaxis label="Pseudo F Statistic";
-    title "2-2. K별 Pseudo-F 추이 (국소 최대 지점이 최적 K 후보)";
+    title "2-2. K별 PseudoF 추이 (국소 최대 지점이 최적 K 후보)";
 run;
 title;
 
@@ -102,7 +109,7 @@ title;
    ※ 여기서 그래프/표를 보고 최적 K를 확정한다 (예: K=4)
    팀 논의 후 아래 매크로변수를 실제 값으로 수정할 것
 ------------------------------------------------------------- */
-%let optimal_k = 4;   /* TODO: 위 CCC/Pseudo-F 결과 보고 확정 */
+%let optimal_k = 8;   /* TODO: 위 CCC/PSF 결과 보고 확정 */
 
 
 /* -------------------------------------------------------------

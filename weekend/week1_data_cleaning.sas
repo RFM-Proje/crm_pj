@@ -10,7 +10,7 @@
   ※ 컬럼명이 한글이므로 encoding=utf-8 옵션 필수
 =============================================================*/
 
-libname proj "/home/student/abcdefg/open";  /* 본인 작업 경로로 수정 */
+libname proj "/home/student/open";  /* 본인 작업 경로로 수정 */
 
 /* -------------------------------------------------------------
    0. 원본 데이터 불러오기 (한글 컬럼 - UTF-8 인코딩)
@@ -24,11 +24,11 @@ libname proj "/home/student/abcdefg/open";  /* 본인 작업 경로로 수정 */
     run;
 %mend;
 
-%import_csv(path=/home/student/abcdefg/open/Onlinesales_info.csv, out=proj.sales_raw);
-%import_csv(path=/home/student/abcdefg/open/Customer_info.csv,   out=proj.cust_raw);
-%import_csv(path=/home/student/abcdefg/open/Discount_info.csv,   out=proj.disc_raw);
-%import_csv(path=/home/student/abcdefg/open/Marketing_info.csv,  out=proj.mkt_raw);
-%import_csv(path=/home/student/abcdefg/open/Tax_info.csv,        out=proj.tax_raw);
+%import_csv(path=/home/student/open/Onlinesales_info.csv, out=proj.sales_raw);
+%import_csv(path=/home/student/open/Customer_info.csv,   out=proj.cust_raw);
+%import_csv(path=/home/student/open/Discount_info.csv,   out=proj.disc_raw);
+%import_csv(path=/home/student/open/Marketing_info.csv,  out=proj.mkt_raw);
+%import_csv(path=/home/student/open/Tax_info.csv,        out=proj.tax_raw);
 
 
 /* -------------------------------------------------------------

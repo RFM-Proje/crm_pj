@@ -18,11 +18,11 @@
         guessingrows=max;
     run;
 %mend;
-%import_csv(path=/home/student/abcdefg/open/Onlinesales_info.csv, out=proj.sales_raw);
-%import_csv(path=/home/student/abcdefg/open/Customer_info.csv,   out=proj.cust_raw);
-%import_csv(path=/home/student/abcdefg/open/Discount_info.csv,   out=proj.disc_raw);
-%import_csv(path=/home/student/abcdefg/open/Marketing_info.csv,  out=proj.mkt_raw);
-%import_csv(path=/home/student/abcdefg/open/Tax_info.csv,        out=proj.tax_raw);
+%import_csv(path=/home/student/open/Onlinesales_info.csv, out=proj.sales_raw);
+%import_csv(path=/home/student/open/Customer_info.csv,   out=proj.cust_raw);
+%import_csv(path=/home/student/open/Discount_info.csv,   out=proj.disc_raw);
+%import_csv(path=/home/student/open/Marketing_info.csv,  out=proj.mkt_raw);
+%import_csv(path=/home/student/open/Tax_info.csv,        out=proj.tax_raw);
 
 
 /* -------------------------------------------------------------
@@ -134,7 +134,7 @@ title;
 %macro check_dup(ds=, label=);
     proc sql;
         select count(*) as 전체행수,
-               count(*) - count(distinct *) as 중복행수
+               count(*) - (select count(*) from (select distinct * from &ds.)) as 중복행수
         from &ds.;
         title "5. &label. 완전 중복행 개수";
     quit;

@@ -9,7 +9,7 @@
     (3주차 군집분석·5주차 이탈예측 로직은 끌어오지 않음)
 =============================================================*/
 
-libname proj "/home/student/abcdefg/open";
+libname proj "/home/student/open";
 
 
 /* -------------------------------------------------------------
@@ -25,7 +25,8 @@ proc sql;
     select
         (select count(distinct 고객ID) from proj.cust_raw)   as Customer_info_전체고객수,
         (select count(distinct 고객ID) from proj.rfm_base)   as RFM_포함고객수,
-        calculated Customer_info_전체고객수 - calculated RFM_포함고객수 as 미구매_고객수;
+        calculated Customer_info_전체고객수 - calculated RFM_포함고객수 as 미구매_고객수
+    from sashelp.class(obs=1);
     title "1. Customer_info 대비 RFM 미포함(미구매) 고객수";
 quit;
 title;

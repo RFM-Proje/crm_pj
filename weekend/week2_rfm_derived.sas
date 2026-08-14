@@ -9,7 +9,7 @@
    - 쿠폰상태 = Clicked(50.9%) / Not Used(15.3%) / Used(33.8%) 3단계
 =============================================================*/
 
-libname proj "/home/student/abcdefg/open";
+libname proj "/home/student/open";
 
 /* -------------------------------------------------------------
    1. 거래 테이블에 월(月) 파생 + Discount_info 조인
