@@ -182,3 +182,9 @@ proc contents data=proj.customer_segments varnum;
     title "5. 최종 세그먼트 테이블(customer_segments) 구조";
 run;
 title;
+
+proc sql;
+	select *
+	from proj.customer_segments
+	where Cluster_ID >=8;
+quit;
