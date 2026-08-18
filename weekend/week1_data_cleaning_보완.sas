@@ -146,3 +146,48 @@ title;
 %check_dup(ds=proj.disc_raw,  label=Discount_info);
 %check_dup(ds=proj.mkt_raw,   label=Marketing_info);
 %check_dup(ds=proj.tax_raw,   label=Tax_info);
+
+/* -------------------------------------------------------------
+   6. Onlinesales_info : 배송료 상위 백분위수 및 이상치 후보
+   [존재 이유]
+   week1_data_cleaning.sas 2-1은 배송료의 평균/표준편차만 확인함.
+   평균금액과 동일한 수준(2-3)으로 상위 백분위수까지 봐야
+   극단적으로 튀는 배송료 거래(오입력/원거리배송 등)를
+   놓치지 않고 파악할 수 있음
+------------------------------------------------------------- */
+proc univariate data=proj.sales_raw noprint;
+    var 배송료;
+    output out=proj.shipping_pctl pctlpts=95 99 99.9 pctlpre=P_;
+run;
+
+proc print data=proj.shipping_pctl;
+    title "6. 배송료 상위 백분위수";
+run;
+title;
+
+/* 상위 0.1% 초과 거래 - 실제 이상치 후보 목록 확인 */
+proc sql;
+    select * from proj.shipping_pctl;
+quit;
+
+proc sql;
+    create table proj.shipping_outlier_candidates as
+    select 거래ID, 고객ID, 거래날짜, 제품카테고리, 배송료
+    from proj.sales_raw
+    having 배송료 > (select P_99_9 from proj.shipping_pctl);
+quit;
+
+proc print data=proj.shipping_outlier_candidates;
+    title "6-1. 배송료 상위 0.1% 초과 거래 (이상치 후보)";
+run;
+title;
+
+/* 거래ID 내에서 배송료가 정말 항상 동일한지 전체 검증 */
+proc sql;
+    select 거래ID, count(distinct 배송료) as 배송료_종류수
+    from proj.sales_raw
+    group by 거래ID
+    having calculated 배송료_종류수 > 1;
+    title "거래ID 내 배송료가 여러 값인 경우 (0건이어야 가설 확정)";
+quit;
+title;/*0건확인 */
