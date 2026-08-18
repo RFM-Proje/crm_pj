@@ -20,6 +20,21 @@
 
 libname proj "/home/student/open";
 
+/* -------------------------------------------------------------
+   0. PNG 저장 목적지 설정
+   [주의] 반드시 아래쪽 proc sgplot/sgpanel 호출보다
+          "먼저" 실행되어 있어야 함. 순서가 바뀌면
+          그림은 정상적으로 그려지지만 SAS Studio 기본
+          임시폴더(SASWORK)에 저장되고 plots 폴더는 비어있게 됨
+------------------------------------------------------------- */
+options dlcreatedir;
+libname _tmp "/home/student/open/plots";
+libname _tmp clear;
+
+ods _all_ close;
+ods listing gpath="/home/student/open/plots";
+ods graphics / reset=all imagefmt=png width=1200px height=500px;
+
 
 /* -------------------------------------------------------------
    1. 일별 집계 테이블 생성
@@ -27,11 +42,6 @@ libname proj "/home/student/open";
         고유고객수는 sales_with_disc(line-item 단위) 기준
       - 평균배송료만 shipping_per_order(주문 단위) 기준으로 별도 계산
 ------------------------------------------------------------- */
-proc contents data=proj.sales_with_disc varnum;
-    title "sales_with_disc 실제 컬럼 타입 확인";
-run;
-title;
-
 proc sql;
     create table proj.daily_agg_core as
     select 거래날짜_num as 날짜 format=yymmdd10.,
@@ -160,6 +170,7 @@ run;
    4. 시각화 - 지표별 일별 값 + 7일 이동평균 + 변화점 표시
 ------------------------------------------------------------- */
 %macro plot_metric(var=);
+    ods graphics / imagename="&var." imagefmt=png;
     proc sgplot data=proj.cp_&var.;
         series x=날짜 y=&var. / lineattrs=(color=lightblue thickness=1) legendlabel="일별 값";
         series x=날짜 y=&var._MA7 / lineattrs=(color=orange thickness=2) legendlabel="7일 이동평균";
@@ -203,6 +214,7 @@ proc sql;
     select 날짜, "총마케팅비" as 지표, 총마케팅비 as 값 from proj.daily_agg_final;
 quit;
 
+ods graphics / imagename="daily_screening_panel" imagefmt=png;
 proc sgpanel data=proj.daily_long;
     panelby 지표 / columns=2 rows=4 novarname;
     series x=날짜 y=값;
@@ -211,3 +223,10 @@ proc sgpanel data=proj.daily_long;
     title "지표별 일별 추이 한눈에 스크리닝";
 run;
 title;
+
+
+/* -------------------------------------------------------------
+   6. ODS 목적지 원복 - 결과 탭에서 다시 보이게 복구
+------------------------------------------------------------- */
+ods listing close;
+ods html5;
