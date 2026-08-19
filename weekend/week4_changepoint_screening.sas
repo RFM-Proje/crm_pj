@@ -230,3 +230,9 @@ title;
 ------------------------------------------------------------- */
 ods listing close;
 ods html5;
+
+data _null_;
+    infile "/home/student/open/plots/총매출액.png" recfm=n;
+    put "확인용 - 위에서 에러 없으면 파일 존재함";
+    stop;
+run;

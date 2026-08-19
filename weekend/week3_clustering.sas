@@ -1,11 +1,37 @@
+
+/* week2_수정.sas 실행 직후, 이어서 바로 돌리면 됨 */
+proc means data=proj.customer_features skewness kurtosis;
+    var Recency Frequency Monetary AvgOrderValue
+        CouponUseRate AvgDiscountRate AvgShipping;
+    title "수정된 AvgOrderValue/AvgShipping 기준 왜도·첨도 재확인";
+run;
+title;
 /*=============================================================
-  WEEK 3. 군집분석 (핵심 세분화 축)
-  입력: proj.customer_features (2주차 산출물)
+  WEEK 3. 군집분석 (핵심 세분화 축) - AvgShipping 로그변환 반영
+  입력: proj.customer_features (2주차 산출물, AvgOrderValue
+        주문단위 재계산 반영된 버전)
   원칙: CCC는 PROC FASTCLUS 단독으로는 산출되지 않는 계층적
         군집(PROC CLUSTER) 통계량이므로, SAS 표준 방식인
         "예비 군집(FASTCLUS) → CCC 기반 K 결정(CLUSTER) →
         최종 군집(FASTCLUS)" 3단계로 진행한다
   산출물: proj.customer_segments (Cluster ID 부여된 최종 세그먼트)
+
+  [이번 수정 사항 - AvgShipping, AvgOrderValue 로그변환 추가]
+  기존: AvgShipping을 원값 그대로 군집 변수에 사용
+        -> K=7 재확인 시 배송료 300~500대인 이상치 고객 2명이
+        각자 단독 군집(고객수 1명)으로 분리되는 문제 발견.
+        AvgShipping의 R-Square가 0.87로 다른 변수 대비 비정상적
+        으로 높게 나와 군집화를 사실상 이 변수 하나가 지배함
+  수정: Frequency/Monetary와 동일하게 log(1+x) 변환한
+        AvgShipping_log를 군집 변수로 사용
+
+  추가 확인: week2에서 AvgOrderValue를 주문단위로 재계산한 뒤
+        왜도 재검증 결과 5.16으로 확인됨(1 이상). 동일한 이유로
+        AvgOrderValue_log를 만들어 군집 변수로 사용
+
+  ※ 두 변수 모두 4-2(군집별 원단위 평균표)에서는 로그값이 아닌
+    원래 단위(AvgShipping, AvgOrderValue)를 그대로 표시함 -
+    군집화 입력변수와 해석/발표용 표시변수는 다를 수 있음
 =============================================================*/
 
 libname proj "/home/student/open";
@@ -25,6 +51,18 @@ data proj.customer_features_log;
     set proj.customer_features;
     Frequency_log = log(1 + Frequency);
     Monetary_log  = log(1 + Monetary);
+
+    /* [신규] AvgShipping도 극단적 왜도(이상치 1~2명이 300~500대
+       배송료) -> 로그변환 없이 그대로 쓰면 K-Means가 이 값만
+       보고 해당 고객을 단독 군집으로 분리시킴 (K=7 재확인 시
+       실제로 확인된 현상: 1명짜리 군집 2개 발생, R-Square=0.87로
+       다른 변수 대비 비정상적으로 군집을 지배) */
+    AvgShipping_log = log(1 + AvgShipping);
+
+    /* [신규] AvgOrderValue 재검증 결과 왜도 5.16으로 확인됨
+       (주문단위 재계산 이후 값 기준). Frequency/Monetary/
+       AvgShipping과 동일하게 로그변환 필요 */
+    AvgOrderValue_log = log(1 + AvgOrderValue);
 run;
 
 
@@ -36,8 +74,8 @@ run;
    평균0/표준편차1로 맞춰 모든 변수의 기여도를 동등하게 함
 ------------------------------------------------------------- */
 proc stdize data=proj.customer_features_log out=proj.customer_features_std method=std;
-    var Recency Frequency_log Monetary_log AvgOrderValue
-        CouponUseRate AvgDiscountRate AvgShipping;
+    var Recency Frequency_log Monetary_log AvgOrderValue_log
+        CouponUseRate AvgDiscountRate AvgShipping_log;
 run;
 
 
@@ -50,8 +88,8 @@ run;
 ------------------------------------------------------------- */
 proc fastclus data=proj.customer_features_std maxclusters=50 maxiter=100
               out=proj.prelim_out mean=proj.prelim_mean noprint;
-    var Recency Frequency_log Monetary_log AvgOrderValue
-        CouponUseRate AvgDiscountRate AvgShipping;
+    var Recency Frequency_log Monetary_log AvgOrderValue_log
+        CouponUseRate AvgDiscountRate AvgShipping_log;
 run;
 
 
@@ -69,8 +107,8 @@ run;
      CCC / PSF / PST2 임 (PseudoF, PseudoT2 아님 - SAS 공식 명칭)
 ------------------------------------------------------------- */
 proc cluster data=proj.prelim_mean method=ward ccc pseudo out=proj.cluster_tree;
-    var Recency Frequency_log Monetary_log AvgOrderValue
-        CouponUseRate AvgDiscountRate AvgShipping;
+    var Recency Frequency_log Monetary_log AvgOrderValue_log
+        CouponUseRate AvgDiscountRate AvgShipping_log;
     ods output ClusterHistory=proj.cluster_stats;
 run;
 
@@ -109,7 +147,17 @@ title;
    ※ 여기서 그래프/표를 보고 최적 K를 확정한다 (예: K=4)
    팀 논의 후 아래 매크로변수를 실제 값으로 수정할 것
 ------------------------------------------------------------- */
-%let optimal_k = 8;   /* TODO: 위 CCC/PSF 결과 보고 확정 */
+%let optimal_k = 6;   /* 최종 확정 (2026.08.19)
+                          - AvgOrderValue_log, AvgShipping_log 반영 후
+                            K=4,5,6 비교 실행
+                          - K=4: 통계 근소 우위, 심플하나 세그먼트 단순
+                          - K=5: 쿠폰의존 세그먼트(CouponUseRate 0.69) 발견
+                          - K=6: CCC(48.69)·전체R²(0.506) 3개 후보 중 최고,
+                            쿠폰의존 세그먼트 + "이탈위험 고객군"(305명,
+                            20.8%, Recency 250.8일로 최고인데 Frequency/
+                            Monetary는 상위권) 신규 발견 - 다음 주차
+                            이탈예측(PROC GRADBOOST)과 스토리 연결됨
+                          -> K=6 최종 채택 */
 
 
 /* -------------------------------------------------------------
@@ -120,8 +168,8 @@ title;
 ------------------------------------------------------------- */
 proc fastclus data=proj.customer_features_std maxclusters=&optimal_k maxiter=100
               out=proj.customer_clustered;
-    var Recency Frequency_log Monetary_log AvgOrderValue
-        CouponUseRate AvgDiscountRate AvgShipping;
+    var Recency Frequency_log Monetary_log AvgOrderValue_log
+        CouponUseRate AvgDiscountRate AvgShipping_log;
     title "3. 최종 K-Means 군집화 (K=&optimal_k)";
 run;
 title;
@@ -144,7 +192,11 @@ proc sql;
         on a.고객ID = b.고객ID;
 quit;
 
-/* 4-2. 군집별 R/F/M 평균 (원 단위 - 해석 용이) */
+/* 4-2. 군집별 R/F/M 평균 (원 단위 - 해석 용이)
+   [주의] 여기서는 군집화에 실제 쓰인 AvgShipping_log가 아니라
+   원래 단위인 AvgShipping을 그대로 보여줌 - "군집7 평균배송료가
+   몇 원이다"처럼 발표할 때 로그값이 아니라 실제 원 단위가
+   필요하기 때문 (군집화 입력변수와 해석용 표시변수는 다를 수 있음) */
 proc means data=proj.customer_segments mean std n;
     class Cluster_ID;
     var Recency Frequency Monetary AvgOrderValue
@@ -182,9 +234,3 @@ proc contents data=proj.customer_segments varnum;
     title "5. 최종 세그먼트 테이블(customer_segments) 구조";
 run;
 title;
-
-proc sql;
-	select *
-	from proj.customer_segments
-	where Cluster_ID >=8;
-quit;

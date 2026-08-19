@@ -8,7 +8,7 @@
    - 반품/취소(수량 음수) 없음 → Frequency는 단순 거래건수로 계산
    - 쿠폰상태 = Clicked(50.9%) / Not Used(15.3%) / Used(33.8%) 3단계
 
-  [이번 수정 사항 - AvgShipping 계산 방식 변경]
+  [수정 사항 1 - AvgShipping 계산 방식 변경]
   기존: sales_with_disc(제품카테고리별 line-item 단위)에서
         바로 mean(배송료)를 계산 → 한 거래(주문)에 여러
         제품카테고리가 담기면 배송료가 그 개수만큼 그대로
@@ -16,6 +16,16 @@
         항상 동일한 값 1개 → 배송료는 "주문 단위" 고정값으로 확인됨)
   수정: 배송료를 거래ID(주문) 단위로 먼저 1행으로 압축한 뒤
         고객 단위로 평균을 내도록 변경
+
+  [수정 사항 2 - AvgOrderValue 계산 방식 변경]
+  기존: sales_with_disc(line-item 단위)에서 바로
+        mean(거래금액)을 계산 → 배송료와 동일한 문제. 한 주문에
+        카테고리가 여러 개 담기면 주문 총액이 아니라 "품목별
+        금액"이 그대로 평균에 들어가서, 다품목 주문일수록
+        평균객단가가 실제 주문 단위 결제금액보다 작게 왜곡됨
+  수정: 거래ID(주문) 단위로 먼저 총액을 합산한 order_total을
+        만들고, 그 주문단위 총액을 고객 단위로 평균 내도록 변경
+        (AvgShipping과 동일한 패턴)
 =============================================================*/
 
 libname proj "/home/student/open";
@@ -81,10 +91,41 @@ title;
 
 
 /* -------------------------------------------------------------
+   1-3. [신규] 주문(거래ID) 단위 총 결제금액 집계
+   [존재 이유]
+   거래금액(=평균금액*수량)은 제품카테고리별 line-item 금액이라,
+   AvgOrderValue("평균 객단가" = 주문 1건당 평균 결제금액)를
+   구하려면 먼저 거래ID 단위로 합산해서 "그 주문에서 실제로
+   얼마를 결제했는가"부터 만들어야 함. 배송료와 달리 거래금액은
+   품목마다 다르므로 sum으로 합산 (distinct 아님)
+------------------------------------------------------------- */
+proc sql;
+    create table proj.order_total as
+    select 고객ID, 거래ID,
+           sum(거래금액) as 주문총액
+    from proj.sales_with_disc
+    group by 고객ID, 거래ID;
+quit;
+
+/* 검증 - 주문총액 합계가 전체 매출액 합계와 같아야 정상 */
+proc sql;
+    select sum(주문총액) as 주문단위_총매출
+    from proj.order_total;
+quit;
+proc sql;
+    select sum(거래금액) as 라인아이템단위_총매출
+    from proj.sales_with_disc;
+    title "1-3. 주문단위 집계 검증 (위 두 값이 같아야 정상)";
+quit;
+title;
+
+
+/* -------------------------------------------------------------
    2. 고객 단위 RFM 지표 산출
    - 기준일(Reference Date) = 데이터 내 최종 거래일 + 1일
-   - AvgShipping은 1-2에서 압축한 shipping_per_order 기준으로
-     별도 계산 후 병합 (수정 사항)
+   - AvgShipping은 1-2의 shipping_per_order,
+     AvgOrderValue는 1-3의 order_total 기준으로
+     각각 별도 계산 후 병합 (수정 사항)
 ------------------------------------------------------------- */
 proc sql noprint;
     select max(거래날짜_num) + 1 into :ref_date
@@ -101,7 +142,6 @@ proc sql;
         &ref_date - max(거래날짜_num)              as Recency label="최근성(일)",
         count(distinct 거래ID)                      as Frequency label="구매빈도(건)",
         sum(거래금액)                                as Monetary label="총구매금액",
-        mean(거래금액)                               as AvgOrderValue label="평균객단가",
         mean(case when 쿠폰상태="Used" then 1 else 0 end)    as CouponUseRate label="쿠폰실사용률",
         mean(case when 쿠폰상태="Clicked" then 1 else 0 end) as CouponClickRate label="쿠폰클릭만비율",
         mean(할인율)                                 as AvgDiscountRate label="평균할인율"
@@ -118,14 +158,26 @@ proc sql;
     group by 고객ID;
 quit;
 
-/* RFM 핵심 지표 + 평균배송료 병합 */
+/* 고객 단위 평균객단가 - 주문단위로 합산된 테이블 기준 (수정된 계산) */
+proc sql;
+    create table proj.avg_order_value as
+    select 고객ID,
+           mean(주문총액) as AvgOrderValue label="평균객단가(주문단위)"
+    from proj.order_total
+    group by 고객ID;
+quit;
+
+/* RFM 핵심 지표 + 평균배송료 + 평균객단가 병합 */
 proc sql;
     create table proj.rfm_base as
     select a.*,
-           b.AvgShipping
+           b.AvgShipping,
+           c.AvgOrderValue
     from proj.rfm_core as a
     left join proj.avg_shipping as b
-        on a.고객ID = b.고객ID;
+        on a.고객ID = b.고객ID
+    left join proj.avg_order_value as c
+        on a.고객ID = c.고객ID;
 quit;
 
 /* RFM 분포 확인 (이상치 유무, 3주차 표준화 전 스케일 파악용) */
