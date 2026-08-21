@@ -89,6 +89,16 @@ quit;
 
 /* -------------------------------------------------------------
    2. 7일 이동평균 계산 (base SAS, DATA step + array 사용)
+   [핵심 버그 수정 - 진짜 원인 발견]
+   buf1~buf7(이동평균 계산용 임시 버퍼)을 drop하지 않아서
+   proj.daily_agg에 그대로 남아있었음. 이 매크로가 지표마다
+   반복 호출되는 구조라, 두 번째 호출부터는 "set proj.daily_agg"
+   시점에 직전 지표가 남긴 buf1~buf7 값을 그대로 물려받아 이동
+   평균 계산이 오염됨(예: 거래건수의 MA7에 총매출액 버퍼 값이
+   섞여 들어감). "drop i;" -> "drop i buf1-buf7;"로 수정하여
+   매 호출마다 버퍼가 확실히 초기화되도록 함. 지금까지 그래프가
+   지표마다 다른 스케일로 깨져 보였던 근본 원인이 바로 이것임
+   (ODS/캐시 문제가 아니었음)
 ------------------------------------------------------------- */
 %macro add_rolling_mean(var=);
     data proj.daily_agg_tmp;
@@ -103,7 +113,7 @@ quit;
         if _n_ >= 7 then do;
             &var._MA7 = mean(of buf1-buf7);
         end;
-        drop i;
+        drop i buf1-buf7;
     run;
 
     data proj.daily_agg;
@@ -168,61 +178,144 @@ run;
 
 /* -------------------------------------------------------------
    4. 시각화 - 지표별 일별 값 + 7일 이동평균 + 변화점 표시
+   [참고] 그동안 그림이 지표마다 뒤섞여 보였던 진짜 원인은
+   2번 섹션의 buf1-buf7 누수 버그였음(이미 수정 완료). 파일명이나
+   ODS 방식 자체는 문제가 아니었으므로, 이번엔 보기 편하도록
+   지표명 그대로 파일명으로 사용함
 ------------------------------------------------------------- */
-%macro plot_metric(var=);
-    ods graphics / imagename="&var." imagefmt=png;
-    proc sgplot data=proj.cp_&var.;
-        series x=날짜 y=&var. / lineattrs=(color=lightblue thickness=1) legendlabel="일별 값";
-        series x=날짜 y=&var._MA7 / lineattrs=(color=orange thickness=2) legendlabel="7일 이동평균";
-        scatter x=날짜 y=&var. / group=변화점후보
+
+/* --- 총매출액 --- */
+ods _all_ close;
+ods listing gpath="/home/student/open/plots";
+ods graphics / reset=all imagefmt=png imagename="총매출액";
+proc sgplot data=proj.cp_총매출액;
+    series x=날짜 y=총매출액 / lineattrs=(color=lightblue thickness=1) legendlabel="일별 값";
+    series x=날짜 y=총매출액_MA7 / lineattrs=(color=orange thickness=2) legendlabel="7일 이동평균";
+    scatter x=날짜 y=총매출액 / group=변화점후보
+                                markerattrs=(symbol=circlefilled size=8)
+                                filledoutlinedmarkers
+                                legendlabel="변화점 후보";
+    xaxis label="날짜" grid;
+    yaxis label="총매출액" grid;
+    title "총매출액 일별 추이 및 변화점 후보";
+run;
+title;
+ods listing close;
+ods html5;
+
+/* --- 거래건수 --- */
+ods _all_ close;
+ods listing gpath="/home/student/open/plots";
+ods graphics / reset=all imagefmt=png imagename="거래건수";
+proc sgplot data=proj.cp_거래건수;
+    series x=날짜 y=거래건수 / lineattrs=(color=lightblue thickness=1) legendlabel="일별 값";
+    series x=날짜 y=거래건수_MA7 / lineattrs=(color=orange thickness=2) legendlabel="7일 이동평균";
+    scatter x=날짜 y=거래건수 / group=변화점후보
+                                markerattrs=(symbol=circlefilled size=8)
+                                filledoutlinedmarkers
+                                legendlabel="변화점 후보";
+    xaxis label="날짜" grid;
+    yaxis label="거래건수" grid;
+    title "거래건수 일별 추이 및 변화점 후보";
+run;
+title;
+ods listing close;
+ods html5;
+
+/* --- 평균단가 --- */
+ods _all_ close;
+ods listing gpath="/home/student/open/plots";
+ods graphics / reset=all imagefmt=png imagename="평균단가";
+proc sgplot data=proj.cp_평균단가;
+    series x=날짜 y=평균단가 / lineattrs=(color=lightblue thickness=1) legendlabel="일별 값";
+    series x=날짜 y=평균단가_MA7 / lineattrs=(color=orange thickness=2) legendlabel="7일 이동평균";
+    scatter x=날짜 y=평균단가 / group=변화점후보
+                                markerattrs=(symbol=circlefilled size=8)
+                                filledoutlinedmarkers
+                                legendlabel="변화점 후보";
+    xaxis label="날짜" grid;
+    yaxis label="평균단가" grid;
+    title "평균단가 일별 추이 및 변화점 후보";
+run;
+title;
+ods listing close;
+ods html5;
+
+/* --- 평균배송료 --- */
+ods _all_ close;
+ods listing gpath="/home/student/open/plots";
+ods graphics / reset=all imagefmt=png imagename="평균배송료";
+proc sgplot data=proj.cp_평균배송료;
+    series x=날짜 y=평균배송료 / lineattrs=(color=lightblue thickness=1) legendlabel="일별 값";
+    series x=날짜 y=평균배송료_MA7 / lineattrs=(color=orange thickness=2) legendlabel="7일 이동평균";
+    scatter x=날짜 y=평균배송료 / group=변화점후보
                                   markerattrs=(symbol=circlefilled size=8)
                                   filledoutlinedmarkers
                                   legendlabel="변화점 후보";
-        xaxis label="날짜" grid;
-        yaxis label="&var." grid;
-        title "&var. 일별 추이 및 변화점 후보";
-    run;
-    title;
-%mend;
-
-%plot_metric(var=총매출액);
-%plot_metric(var=거래건수);
-%plot_metric(var=평균단가);
-%plot_metric(var=평균배송료);
-%plot_metric(var=쿠폰사용률);
-%plot_metric(var=고유고객수);
-%plot_metric(var=총마케팅비);
-
-
-/* -------------------------------------------------------------
-   5. (선택) 여러 지표를 한번에 스크리닝 - PROC SGPANEL
-------------------------------------------------------------- */
-proc sql;
-    create table proj.daily_long as
-    select 날짜, "총매출액" as 지표, 총매출액 as 값 from proj.daily_agg_final
-    outer union corr
-    select 날짜, "거래건수" as 지표, 거래건수 as 값 from proj.daily_agg_final
-    outer union corr
-    select 날짜, "평균단가" as 지표, 평균단가 as 값 from proj.daily_agg_final
-    outer union corr
-    select 날짜, "평균배송료" as 지표, 평균배송료 as 값 from proj.daily_agg_final
-    outer union corr
-    select 날짜, "쿠폰사용률" as 지표, 쿠폰사용률 as 값 from proj.daily_agg_final
-    outer union corr
-    select 날짜, "고유고객수" as 지표, 고유고객수 as 값 from proj.daily_agg_final
-    outer union corr
-    select 날짜, "총마케팅비" as 지표, 총마케팅비 as 값 from proj.daily_agg_final;
-quit;
-
-ods graphics / imagename="daily_screening_panel" imagefmt=png;
-proc sgpanel data=proj.daily_long;
-    panelby 지표 / columns=2 rows=4 novarname;
-    series x=날짜 y=값;
-    rowaxis label="";
-    colaxis label="날짜" grid;
-    title "지표별 일별 추이 한눈에 스크리닝";
+    xaxis label="날짜" grid;
+    yaxis label="평균배송료" grid;
+    title "평균배송료 일별 추이 및 변화점 후보";
 run;
 title;
+ods listing close;
+ods html5;
+
+/* --- 쿠폰사용률 --- */
+ods _all_ close;
+ods listing gpath="/home/student/open/plots";
+ods graphics / reset=all imagefmt=png imagename="쿠폰사용률";
+proc sgplot data=proj.cp_쿠폰사용률;
+    series x=날짜 y=쿠폰사용률 / lineattrs=(color=lightblue thickness=1) legendlabel="일별 값";
+    series x=날짜 y=쿠폰사용률_MA7 / lineattrs=(color=orange thickness=2) legendlabel="7일 이동평균";
+    scatter x=날짜 y=쿠폰사용률 / group=변화점후보
+                                  markerattrs=(symbol=circlefilled size=8)
+                                  filledoutlinedmarkers
+                                  legendlabel="변화점 후보";
+    xaxis label="날짜" grid;
+    yaxis label="쿠폰사용률" grid;
+    title "쿠폰사용률 일별 추이 및 변화점 후보";
+run;
+title;
+ods listing close;
+ods html5;
+
+/* --- 고유고객수 --- */
+ods _all_ close;
+ods listing gpath="/home/student/open/plots";
+ods graphics / reset=all imagefmt=png imagename="고유고객수";
+proc sgplot data=proj.cp_고유고객수;
+    series x=날짜 y=고유고객수 / lineattrs=(color=lightblue thickness=1) legendlabel="일별 값";
+    series x=날짜 y=고유고객수_MA7 / lineattrs=(color=orange thickness=2) legendlabel="7일 이동평균";
+    scatter x=날짜 y=고유고객수 / group=변화점후보
+                                  markerattrs=(symbol=circlefilled size=8)
+                                  filledoutlinedmarkers
+                                  legendlabel="변화점 후보";
+    xaxis label="날짜" grid;
+    yaxis label="고유고객수" grid;
+    title "고유고객수 일별 추이 및 변화점 후보";
+run;
+title;
+ods listing close;
+ods html5;
+
+/* --- 총마케팅비 --- */
+ods _all_ close;
+ods listing gpath="/home/student/open/plots";
+ods graphics / reset=all imagefmt=png imagename="총마케팅비";
+proc sgplot data=proj.cp_총마케팅비;
+    series x=날짜 y=총마케팅비 / lineattrs=(color=lightblue thickness=1) legendlabel="일별 값";
+    series x=날짜 y=총마케팅비_MA7 / lineattrs=(color=orange thickness=2) legendlabel="7일 이동평균";
+    scatter x=날짜 y=총마케팅비 / group=변화점후보
+                                  markerattrs=(symbol=circlefilled size=8)
+                                  filledoutlinedmarkers
+                                  legendlabel="변화점 후보";
+    xaxis label="날짜" grid;
+    yaxis label="총마케팅비" grid;
+    title "총마케팅비 일별 추이 및 변화점 후보";
+run;
+title;
+ods listing close;
+ods html5;
 
 
 /* -------------------------------------------------------------
@@ -230,9 +323,3 @@ title;
 ------------------------------------------------------------- */
 ods listing close;
 ods html5;
-
-data _null_;
-    infile "/home/student/open/plots/총매출액.png" recfm=n;
-    put "확인용 - 위에서 에러 없으면 파일 존재함";
-    stop;
-run;
