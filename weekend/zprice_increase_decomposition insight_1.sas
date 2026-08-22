@@ -43,15 +43,27 @@ run;
    3. (a) 카테고리 믹스가 바뀌었는지 확인
    - 전반기 vs 후반기, 카테고리별 매출 비중(%) 비교
    - 특정 카테고리 비중이 후반기에 커졌다면 "믹스 변화"가 원인
+   [수정] SAS PROC SQL은 OVER(PARTITION BY ...) 윈도우 함수를
+   지원하지 않음 -> 시기별 총매출을 먼저 별도로 구한 뒤
+   서브쿼리로 조인하는 방식으로 변경
 ------------------------------------------------------------- */
 proc sql;
-    create table proj.period_category_share as
-    select 시기, 제품카테고리,
-           sum(거래금액) as 카테고리매출,
-           sum(거래금액) / sum(sum(거래금액)) over (partition by 시기) * 100 as 매출비중_pct
+    create table proj.period_total as
+    select 시기, sum(거래금액) as 시기총매출
     from proj.sales_with_period
-    group by 시기, 제품카테고리
-    order by 시기, 매출비중_pct descending;
+    group by 시기;
+quit;
+
+proc sql;
+    create table proj.period_category_share as
+    select a.시기, a.제품카테고리,
+           sum(a.거래금액) as 카테고리매출,
+           sum(a.거래금액) / b.시기총매출 * 100 as 매출비중_pct
+    from proj.sales_with_period as a
+    inner join proj.period_total as b
+        on a.시기 = b.시기
+    group by a.시기, a.제품카테고리, b.시기총매출
+    order by a.시기, 매출비중_pct descending;
 quit;
 
 proc print data=proj.period_category_share;
