@@ -106,32 +106,41 @@ quit;
         마케팅비_lag = lag&lag.(총마케팅비);
     run;
 
+    /* [수정] WITH 문을 쓰면 OUTP= 출력 데이터셋에서 상관계수가
+       예상과 다른 위치/컬럼명으로 나와 값이 비게 됨(총매출액이
+       초기화 안 된 것으로 나타남). WITH 없이 세 변수를 그냥
+       VAR에 같이 넣고, corr 행렬에서 원하는 셀만 뽑는 방식으로 변경.
+       [정밀분석 추가] 총매출액뿐 아니라 거래건수와의 상관도 같이
+       확인해서, 두 지표가 같은 lag에서 반응하는지 교차검증 */
     proc corr data=proj.lag_tmp outp=proj.corr_out_&lag. noprint;
-        var 마케팅비_lag;
-        with 총매출액;
+        var 마케팅비_lag 총매출액 거래건수;
     run;
 
     data proj.corr_result_&lag.;
-        set proj.corr_out_&lag.(where=(_type_="CORR" and _name_="마케팅비_lag"));
+        set proj.corr_out_&lag.(where=(_type_="CORR" and upcase(_name_)="마케팅비_LAG"));
         lag일수 = &lag.;
-        상관계수 = 총매출액;
-        keep lag일수 상관계수;
+        상관계수_매출액 = 총매출액;
+        상관계수_거래건수 = 거래건수;
+        keep lag일수 상관계수_매출액 상관계수_거래건수;
     run;
 %mend;
 
-%lag_corr(lag=0);
-%lag_corr(lag=1);
-%lag_corr(lag=2);
-%lag_corr(lag=3);
-%lag_corr(lag=5);
-%lag_corr(lag=7);
-%lag_corr(lag=10);
-%lag_corr(lag=14);
+/* [정밀분석] 0~14일 전 구간을 촘촘하게(1일 단위) 확인 -
+   기존에는 0,1,2,3,5,7,10,14만 봐서 5 근처에 진짜 봉우리가
+   있는지 불확실했음. %do 루프로 0~14 전부 자동 반복 처리 */
+%macro run_all_lags();
+    %do i = 0 %to 14;
+        %lag_corr(lag=&i.);
+    %end;
+%mend;
+%run_all_lags();
 
 data proj.lag_corr_summary;
-    set proj.corr_result_0 proj.corr_result_1 proj.corr_result_2
-        proj.corr_result_3 proj.corr_result_5 proj.corr_result_7
-        proj.corr_result_10 proj.corr_result_14;
+    set proj.corr_result_0  proj.corr_result_1  proj.corr_result_2
+        proj.corr_result_3  proj.corr_result_4  proj.corr_result_5
+        proj.corr_result_6  proj.corr_result_7  proj.corr_result_8
+        proj.corr_result_9  proj.corr_result_10 proj.corr_result_11
+        proj.corr_result_12 proj.corr_result_13 proj.corr_result_14;
 run;
 
 proc sort data=proj.lag_corr_summary;
@@ -139,17 +148,121 @@ proc sort data=proj.lag_corr_summary;
 run;
 
 proc print data=proj.lag_corr_summary;
-    title "3-1. lag일수별 (마케팅비 vs 총매출액) 상관계수";
+    title "3-1. lag일수별(0~14일, 1일 단위) 상관계수 - 매출액 및 거래건수";
     title2 "상관계수가 가장 높은 lag일수가 실제 반응 시차";
 run;
 title;
 
+/* 상관계수 최댓값 지점 자동 표시 (매출액 기준, 거래건수 기준 각각) */
+proc sql;
+    select "매출액 기준" as 기준, lag일수, 상관계수_매출액 as 최고상관계수
+    from proj.lag_corr_summary
+    having 상관계수_매출액 = max(상관계수_매출액)
+    outer union corr
+    select "거래건수 기준" as 기준, lag일수, 상관계수_거래건수 as 최고상관계수
+    from proj.lag_corr_summary
+    having 상관계수_거래건수 = max(상관계수_거래건수);
+    title "3-1-1. 상관계수가 가장 높은 lag일수 - 매출액/거래건수 각각 확인 (같은 lag면 신뢰도↑)";
+quit;
+title;
+
 proc sgplot data=proj.lag_corr_summary;
-    series x=lag일수 y=상관계수 / markers lineattrs=(thickness=2);
+    series x=lag일수 y=상관계수_매출액 / markers lineattrs=(thickness=2 color=orange) legendlabel="총매출액과의 상관계수";
+    series x=lag일수 y=상관계수_거래건수 / markers lineattrs=(thickness=2 color=blue) legendlabel="거래건수와의 상관계수";
     refline 0 / axis=y lineattrs=(pattern=dash);
-    xaxis label="마케팅비 지연일수(lag)" integer;
-    yaxis label="상관계수 (마케팅비 vs 총매출액)";
-    title "3-2. 마케팅비 변화가 매출에 반영되기까지 걸리는 시차";
+    xaxis label="마케팅비 지연일수(lag)" integer values=(0 to 14);
+    yaxis label="상관계수";
+    title "3-2. 마케팅비 변화가 매출/거래건수에 반영되기까지 걸리는 시차 (0~14일 촘촘 확인)";
+run;
+title;
+
+
+/* -------------------------------------------------------------
+   [정밀분석 추가] 일별 노이즈(요일 효과)를 줄이기 위해 주 단위로
+   재집계해서 같은 lag 분석 재실행. 또한 "하루치 마케팅비"가 아니라
+   "최근 며칠 누적 마케팅비"로 바꿔서 누적효과도 확인
+------------------------------------------------------------- */
+
+/* (A) 주 단위 집계 - 요일 노이즈 제거 후 재확인 */
+proc sql;
+    create table proj.weekly_agg as
+    select intnx('week', 날짜, 0) as 주 format=yymmdd10.,
+           sum(총마케팅비) as 주간마케팅비,
+           sum(총매출액) as 주간매출액,
+           sum(거래건수) as 주간거래건수
+    from proj.daily_agg_final
+    group by 주
+    order by 주;
+quit;
+
+%macro lag_corr_weekly(lag=);
+    data proj.wlag_tmp;
+        set proj.weekly_agg;
+        마케팅비_lag = lag&lag.(주간마케팅비);
+    run;
+
+    proc corr data=proj.wlag_tmp outp=proj.wcorr_out_&lag. noprint;
+        var 마케팅비_lag 주간매출액;
+    run;
+
+    data proj.wcorr_result_&lag.;
+        set proj.wcorr_out_&lag.(where=(_type_="CORR" and upcase(_name_)="마케팅비_LAG"));
+        lag주수 = &lag.;
+        상관계수 = 주간매출액;
+        keep lag주수 상관계수;
+    run;
+%mend;
+
+%macro run_weekly_lags();
+    %do w = 0 %to 4;
+        %lag_corr_weekly(lag=&w.);
+    %end;
+%mend;
+%run_weekly_lags();
+
+data proj.weekly_lag_summary;
+    set proj.wcorr_result_0 proj.wcorr_result_1 proj.wcorr_result_2
+        proj.wcorr_result_3 proj.wcorr_result_4;
+run;
+
+proc print data=proj.weekly_lag_summary;
+    title "3-3. [주단위 재집계] lag주수별 마케팅비-매출액 상관계수 (요일 노이즈 제거)";
+run;
+title;
+
+
+/* (B) 누적 마케팅비 - "최근 N일 합계"로 봤을 때 상관관계가
+   더 강해지는지 확인 (3일/5일/7일 누적) */
+proc sql;
+    create table proj.cum_base as
+    select 날짜, 총마케팅비, 총매출액
+    from proj.daily_agg_final
+    order by 날짜;
+quit;
+
+data proj.cum_marketing;
+    set proj.cum_base;
+    retain buf1-buf7 0;
+    array buf{7} buf1-buf7;
+    do i = 1 to 6;
+        buf{i} = buf{i+1};
+    end;
+    buf{7} = 총마케팅비;
+
+    누적3일 = sum(buf5, buf6, buf7);
+    누적5일 = sum(buf3, buf4, buf5, buf6, buf7);
+    누적7일 = sum(of buf1-buf7);
+    drop i buf1-buf7;
+run;
+
+proc corr data=proj.cum_marketing noprint outp=proj.cum_corr_out;
+    var 누적3일 누적5일 누적7일 총매출액;
+run;
+
+proc print data=proj.cum_corr_out(where=(_type_="CORR" and
+      upcase(_name_) in ("누적3일", "누적5일", "누적7일")));
+    var _name_ 총매출액;
+    title "3-4. 누적 마케팅비(3/5/7일 합산)와 매출액의 상관계수 - 하루치보다 강한지 확인";
 run;
 title;
 
@@ -217,3 +330,5 @@ title;
    - 4-3에서 크리스마스 이후 주가 확연히 낮으면
      -> 연말 공휴일로 인한 실제 소비 패턴(정상), 데이터 문제 아님
 ------------------------------------------------------------- */
+cas mysession;
+caslib _all_ list;
