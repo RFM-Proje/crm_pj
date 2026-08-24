@@ -1,73 +1,23 @@
 /*=============================================================
-  WEEK 6. 이탈예측 (PROC GRADBOOST)
-  입력: proj.customer_segments (3주차 K=6 산출물)
-  목표: 90일 이상 미구매 고객을 "이탈"로 정의하고,
-        Recency/Cluster_ID를 제외한 나머지 특성으로 예측
+  WEEK 6b. 모델 비교(로지스틱 베이스라인 vs 랜덤포레스트 vs GRADBOOST)
+           + GRADBOOST 상위 변수 PDP(방향성 해석)  [수정판 v2]
 
-  [이탈 정의 관련 핵심 주의사항]
-  Recency(최근성)로 이탈 여부를 정의하기 때문에, Recency 자체와
-  Recency 기반으로 만들어진 Cluster_ID를 예측변수에 그대로 넣으면
-  "정답을 미리 알려주고 맞히는" 순환논리(data leakage)가 됨.
-  따라서 두 변수 모두 예측 입력에서 제외하고, Frequency/Monetary/
-  AvgOrderValue/쿠폰·할인·배송료/인구통계만 사용함
+  전제조건: 이 파일은 week6_churn_prediction.sas가 만든
+            proj.churn_split (구분=TRAIN/VALID, 이탈여부) 를 그대로 사용함.
+            세션을 새로 열었다면 week1~week6 순서대로 먼저 실행 후 이 파일 실행.
+
+  v2에서 수정된 것:
+  1) savestate=옵션 -> savestate statement로 수정 (PROC GRADBOOST 문법오류,
+     이게 연쇄적으로 이후 전체 스텝을 구문확인모드(OBS=0)로 만들었던 근본원인)
+  2) PROC MEANS의 PCTLPTS=/PCTLPRE=는 PROC UNIVARIATE 문법이었음 -> p10=~p90= 로 수정
+  3) 한글 변수명(가입기간)을 매크로 변수 이름에 직접 써서 나던 오류 ->
+     ASCII 태그(tenure) 별도 파라미터로 분리
+  4) 예측확률 컬럼명을 하드코딩하지 않고 find_prob_var 매크로로 자동탐지
+     (로지스틱/RF/GRADBOOST가 각각 다른 이름을 쓸 수 있어서)
 =============================================================*/
 
 libname proj "/home/student/open";
 
-
-/* -------------------------------------------------------------
-   1. 이탈 라벨 생성 (90일 기준)
-------------------------------------------------------------- */
-data proj.churn_base;
-    set proj.customer_segments;
-    if Recency > 90 then 이탈여부 = 1;
-    else 이탈여부 = 0;
-run;
-
-/* 이탈 비율 확인 - 너무 한쪽으로 쏠려있으면(예: 95:5) 모델링 시
-   클래스 불균형 보정이 추가로 필요할 수 있음 */
-proc freq data=proj.churn_base;
-    tables 이탈여부 / nocum;
-    title "1-1. 이탈여부 분포 (90일 기준)";
-run;
-title;
-
-/* 참고 - 군집(K=6)별 이탈률도 같이 확인 (검증용, 예측변수 아님) */
-proc freq data=proj.churn_base;
-    tables Cluster_ID * 이탈여부 / nopercent norow;
-    title "1-2. [참고용] 군집별 이탈률 - Cluster_ID=2(이탈위험 세그먼트)와 일치하는지 확인";
-run;
-title;
-
-
-/* -------------------------------------------------------------
-   2. 학습/검증 데이터 분할 (70:30)
-------------------------------------------------------------- */
-data proj.churn_split;
-    set proj.churn_base;
-    call streaminit(2026);
-    _rand = rand("uniform");
-    if _rand <= 0.7 then 구분 = "TRAIN";
-    else 구분 = "VALID";
-    drop _rand;
-run;
-
-proc freq data=proj.churn_split;
-    tables 구분 * 이탈여부 / nopercent norow nocol;
-    title "2-1. 학습/검증 분할 및 각 구간의 이탈여부 분포 확인";
-run;
-title;
-
-
-/* -------------------------------------------------------------
-   3. CAS 세션 연결 및 데이터 업로드
-   [참고] PROC GRADBOOST는 SAS Viya(CAS) 전용 프로시저로, 반드시
-   CAS 라이브러리에 있는 테이블을 대상으로 실행해야 함. 아래
-   caslib 이름(casuser)은 환경마다 다를 수 있으니, 만약 에러가
-   나면 담당 조교/환경설정에 맞는 caslib 이름으로 바꿀 것
-   [수정] 세션을 다시 실행할 때 "이미 존재하는 세션" 경고가
-   반복되지 않도록, 기존 세션이 없을 때만 새로 만들도록 처리
-------------------------------------------------------------- */
 %if %sysfunc(sessfound(mysession)) = 0 %then %do;
     cas mysession;
 %end;
@@ -79,9 +29,75 @@ run;
 
 
 /* -------------------------------------------------------------
-   4. PROC GRADBOOST 모델링
-   - Recency, Cluster_ID, 고객ID는 예측변수에서 제외 (data leakage
-     방지 + 식별자이기 때문)
+   0. 예측확률 컬럼 자동탐지 매크로
+   'P_'로 시작하고 '1'로 끝나는 컬럼을 찾음 (P_1, P_이탈여부1 등 모두 대응)
+------------------------------------------------------------- */
+%macro find_prob_var(dsn=, outvar=);
+    %global &outvar;  /* 이게 빠져서 매크로 밖에서 값이 사라졌던 게 근본 원인 */
+    proc contents data=&dsn out=work._cols_&outvar(keep=name) noprint;
+    run;
+    proc sql noprint;
+        select name into :&outvar trimmed
+        from work._cols_&outvar
+        where upcase(name) like 'P\_%1' escape '\';
+    quit;
+    %put NOTE: [find_prob_var] &dsn 에서 찾은 예측확률 컬럼 = %superq(&outvar);
+%mend find_prob_var;
+
+
+/* -------------------------------------------------------------
+   1. 베이스라인 - PROC LOGISTIC (base SAS, CAS 불필요)
+------------------------------------------------------------- */
+proc logistic data=proj.churn_split(where=(구분="TRAIN")) outmodel=work.logit_model;
+    class 성별 고객지역 / param=ref;
+    model 이탈여부(event="1") = Frequency Monetary AvgOrderValue
+          CouponUseRate CouponClickRate AvgDiscountRate AvgShipping
+          가입기간 성별 고객지역;
+run;
+
+proc logistic inmodel=work.logit_model;
+    score data=proj.churn_split(where=(구분="VALID"))
+          out=proj.logit_scored;
+run;
+
+data mycas.logit_scored;
+    set proj.logit_scored;
+run;
+
+%find_prob_var(dsn=mycas.logit_scored, outvar=logit_pvar);
+
+
+/* -------------------------------------------------------------
+   2. 랜덤포레스트 - PROC FOREST (CAS/Viya 전용)
+------------------------------------------------------------- */
+proc forest data=mycas.churn_split
+            ntrees=100
+            seed=2026;
+    partition rolevar=구분(TRAIN='TRAIN' VALIDATE='VALID');
+    target 이탈여부 / level=nominal;
+    input Frequency Monetary AvgOrderValue CouponUseRate CouponClickRate
+          AvgDiscountRate AvgShipping 가입기간 / level=interval;
+    input 성별 고객지역 / level=nominal;
+    output out=mycas.rf_scored copyvars=(고객ID 이탈여부);
+    ods output VariableImportance=proj.rf_var_importance
+               FitStatistics=proj.rf_fit_stats;
+run;
+
+proc print data=proj.rf_var_importance;
+    title "2-1. 랜덤포레스트 변수 중요도 - GRADBOOST 순위와 비교";
+run;
+title;
+
+proc print data=proj.rf_fit_stats;
+    title "2-2. 랜덤포레스트 적합도 - train/valid 오분류율 격차로 과적합 재확인";
+run;
+title;
+
+%find_prob_var(dsn=mycas.rf_scored, outvar=rf_pvar);
+
+
+/* -------------------------------------------------------------
+   3. GRADBOOST 재학습 (savestate STATEMENT로 astore 저장 - v2에서 수정)
 ------------------------------------------------------------- */
 proc gradboost data=mycas.churn_split
                 ntrees=100
@@ -92,56 +108,143 @@ proc gradboost data=mycas.churn_split
           AvgDiscountRate AvgShipping 가입기간 / level=interval;
     input 성별 고객지역 / level=nominal;
     output out=mycas.churn_scored copyvars=(고객ID 이탈여부);
-    ods output VariableImportance=proj.var_importance
-               FitStatistics=proj.fit_stats;
+    savestate rstore=mycas.gb_astore;
 run;
 
-proc print data=proj.var_importance;
-    title "4-1. 변수 중요도 - 어떤 특성이 이탈 예측에 가장 크게 기여하는지";
-run;
-title;
-
-proc print data=proj.fit_stats;
-    title "4-2. 학습/검증 적합도 지표 (오분류율 등)";
-run;
-title;
+%find_prob_var(dsn=mycas.churn_scored, outvar=gb_pvar);
 
 
 /* -------------------------------------------------------------
-   5. 검증셋 성능 평가 - ROC/AUC
-   [수정] FITSTAT 문의 PVAR=에 실제 타겟변수(이탈여부)를 잘못
-   넣었던 게 에러 원인. PVAR는 예측"확률" 컬럼용이라 이미 INPUT
-   문에 지정한 P_이탈여부1과 중복이라 FITSTAT 문 자체를 제거하고
-   INPUT 문만으로 ROC 계산
+   4. 3개 모델 동일 기준으로 AUC 산출 (PROC ASSESS)
+   [주의] ROCInfo 실제 컬럼명은 AUC=C, TPR=Sensitivity, FPR은 컬럼이
+   따로 없어 1-Specificity로 직접 계산 (이전 프로젝트에서 확인된 명명규칙)
+   만약 아래 결과가 이상하면 proc contents data=work.roc_gb; 로 실제
+   컬럼명부터 재확인할 것
 ------------------------------------------------------------- */
+proc assess data=mycas.logit_scored;
+    target 이탈여부 / event="1" level=nominal;
+    input &logit_pvar;
+    ods output ROCInfo=work.roc_logit;
+run;
+data work.roc_logit; set work.roc_logit; 모델="1_로지스틱(베이스라인)"; run;
+
+proc assess data=mycas.rf_scored;
+    target 이탈여부 / event="1" level=nominal;
+    input &rf_pvar;
+    ods output ROCInfo=work.roc_rf;
+run;
+data work.roc_rf; set work.roc_rf; 모델="2_랜덤포레스트"; run;
+
 proc assess data=mycas.churn_scored;
     target 이탈여부 / event="1" level=nominal;
-    input P_이탈여부1;
-    ods output ROCInfo=proj.roc_info
-               FitStat=proj.assess_fitstat;
+    input &gb_pvar;
+    ods output ROCInfo=work.roc_gb;
+run;
+data work.roc_gb; set work.roc_gb; 모델="3_GRADBOOST"; run;
+
+/* [확인용] 실제 컬럼명 확인 - 여기 결과 보고 아래 C/Sensitivity가 맞는지 체크 */
+proc contents data=work.roc_gb varnum;
+    title "4-0. [확인용] ROCInfo 실제 컬럼명 목록";
+run;
+title;
+
+data proj.roc_compare;
+    set work.roc_logit work.roc_rf work.roc_gb;
+    OneMinusSpecificity = 1 - Specificity;
 run;
 
 proc sql;
-    select max(area) as AUC
-    from proj.roc_info;
-    title "5-1. 검증셋 AUC (0.5=무작위, 1.0=완벽 예측)";
+    create table proj.auc_summary as
+    select 모델, max(C) as AUC format=6.4
+    from proj.roc_compare
+    group by 모델;
+    title "4-1. 3개 모델 AUC 비교 - GRADBOOST가 베이스라인보다 유의미하게 나은지 확인";
+    select * from proj.auc_summary order by 모델;
 quit;
 title;
 
-proc sgplot data=proj.roc_info;
-    series x=fpr y=tpr;
+proc sgplot data=proj.roc_compare;
+    series x=OneMinusSpecificity y=Sensitivity / group=모델 lineattrs=(thickness=2);
     lineparm x=0 y=0 slope=1 / lineattrs=(pattern=dash color=gray);
-    xaxis label="FPR (위양성률)";
-    yaxis label="TPR (재현율)";
-    title "5-2. ROC Curve";
+    xaxis label="FPR (1-Specificity)";
+    yaxis label="TPR (Sensitivity)";
+    title "4-2. 모델별 ROC Curve 비교";
 run;
 title;
 
 
 /* -------------------------------------------------------------
-   6. 마무리 - CAS 세션 정리
+   5. GRADBOOST 상위 변수 PDP
+------------------------------------------------------------- */
+data work.pdp_base_sample;
+    set proj.churn_split(where=(구분="VALID"));
+    call streaminit(2026);
+    if rand("uniform") <= 300/424 then output;
+run;
+
+data mycas.pdp_base;
+    set work.pdp_base_sample;
+run;
+
+/* vname: 실제 스코어링에 쓰일 컬럼명(한글 가능) / tag: 매크로변수·파일명용 ASCII 태그 */
+%macro make_pdp(vname=, tag=);
+
+    proc means data=proj.churn_split noprint;
+        var &vname;
+        output out=work.pctl_&tag
+            p10=g1 p20=g2 p30=g3 p40=g4 p50=g5 p60=g6 p70=g7 p80=g8 p90=g9;
+    run;
+
+    data _null_;
+        set work.pctl_&tag;
+        array g g1-g9;
+        do i=1 to 9;
+            call symputx(cats('grid_', "&tag", '_', i), g(i));
+        end;
+    run;
+
+    data mycas.pdp_grid_&tag;
+        set mycas.pdp_base;
+        %do i=1 %to 9;
+            &vname = &&grid_&tag._&i;
+            grid_id = &i;
+            grid_value = &&grid_&tag._&i;
+            output;
+        %end;
+    run;
+
+    proc astore;
+        score data=mycas.pdp_grid_&tag
+              out=mycas.pdp_scored_&tag
+              rstore=mycas.gb_astore
+              copyvars=(grid_id grid_value);
+    run;
+
+    %find_prob_var(dsn=mycas.pdp_scored_&tag, outvar=pdp_pvar_&tag);
+
+    proc means data=mycas.pdp_scored_&tag noprint nway;
+        class grid_value;
+        var &&pdp_pvar_&tag;
+        output out=proj.pdp_&tag(drop=_type_ _freq_) mean=평균예측확률;
+    run;
+
+    proc sgplot data=proj.pdp_&tag;
+        series x=grid_value y=평균예측확률 / markers;
+        xaxis label="&vname (P10~P90)";
+        yaxis label="평균 예측 이탈확률";
+        title "5. PDP - &vname 값에 따른 이탈확률 변화";
+    run;
+    title;
+
+%mend make_pdp;
+
+%make_pdp(vname=AvgShipping, tag=AvgShipping);
+%make_pdp(vname=AvgOrderValue, tag=AvgOrderValue);
+%make_pdp(vname=Monetary, tag=Monetary);
+%make_pdp(vname=가입기간, tag=tenure);
+
+
+/* -------------------------------------------------------------
+   6. 마무리
 ------------------------------------------------------------- */
 cas mysession terminate;
-
-proc contents data=proj.roc_info varnum;
-run;
