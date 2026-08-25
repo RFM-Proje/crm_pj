@@ -214,6 +214,7 @@ proc gradboost data=mycas.churn_split_v2
           CouponUseRate CouponClickRate 가입기간 / level=interval;
     input 성별 고객지역 / level=nominal;
     output out=mycas.churn_scored_v2 copyvars=(고객ID 이탈여부);
+    savestate rstore=mycas.gb_astore_v2;
     ods output VariableImportance=proj.churn_var_importance_v2
                FitStatistics=proj.churn_fit_stats_v2;
 run;
@@ -241,6 +242,12 @@ title;
 
 %find_prob_var(dsn=mycas.churn_scored_v2, outvar=v2_pvar);
 
+/* 7주차(최종 등급 설계)에서 재사용하기 위해 영구 저장 */
+data proj.churn_scored_v2;
+    set mycas.churn_scored_v2;
+run;
+
+
 proc assess data=mycas.churn_scored_v2;
     target 이탈여부 / event="1" level=nominal;
     input &v2_pvar;
@@ -253,6 +260,71 @@ proc sql;
     from proj.churn_roc_v2;
 quit;
 title;
+
+
+/* -------------------------------------------------------------
+   7-2. [새 모델] 상위 변수 PDP - Recency가 새로 1위로 올라온 것의
+   방향성 확인 목적 (week6b와 동일한 방식, VALID셋 352명 전체 사용)
+------------------------------------------------------------- */
+data mycas.pdp_base_v2;
+    set proj.churn_split_v2(where=(구분="VALID"));
+run;
+
+%macro make_pdp_v2(vname=, tag=);
+
+    proc means data=proj.churn_split_v2 noprint;
+        var &vname;
+        output out=work.pctl_v2_&tag
+            p10=g1 p20=g2 p30=g3 p40=g4 p50=g5 p60=g6 p70=g7 p80=g8 p90=g9;
+    run;
+
+    data _null_;
+        set work.pctl_v2_&tag;
+        array g g1-g9;
+        do i=1 to 9;
+            call symputx(cats('grid_v2_', "&tag", '_', i), g(i));
+        end;
+    run;
+
+    data mycas.pdp_grid_v2_&tag;
+        set mycas.pdp_base_v2;
+        %do i=1 %to 9;
+            &vname = &&grid_v2_&tag._&i;
+            grid_id = &i;
+            grid_value = &&grid_v2_&tag._&i;
+            output;
+        %end;
+    run;
+
+    proc astore;
+        score data=mycas.pdp_grid_v2_&tag
+              out=mycas.pdp_scored_v2_&tag
+              rstore=mycas.gb_astore_v2
+              copyvars=(grid_id grid_value);
+    run;
+
+    %find_prob_var(dsn=mycas.pdp_scored_v2_&tag, outvar=pdp_v2_pvar_&tag);
+
+    proc means data=mycas.pdp_scored_v2_&tag noprint nway;
+        class grid_value;
+        var &&pdp_v2_pvar_&tag;
+        output out=proj.pdp_v2_&tag(drop=_type_ _freq_) mean=평균예측확률;
+    run;
+
+    proc sgplot data=proj.pdp_v2_&tag;
+        series x=grid_value y=평균예측확률 / markers;
+        xaxis label="&vname (P10~P90)";
+        yaxis label="평균 예측 이탈확률";
+        title "7-2. [새 모델] PDP - &vname 값에 따른 이탈확률 변화";
+    run; 
+    title;
+
+%mend make_pdp_v2;
+
+%make_pdp_v2(vname=Recency, tag=Recency);
+%make_pdp_v2(vname=CouponUseRate, tag=CouponUseRate);
+%make_pdp_v2(vname=가입기간, tag=tenure);
+%make_pdp_v2(vname=Monetary, tag=Monetary);
 
 
 /* -------------------------------------------------------------
