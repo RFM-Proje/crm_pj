@@ -36,7 +36,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from xgboost import XGBClassifier
 from sklearn.metrics import roc_auc_score
-
+import koreanize_matplotlib
 DATA_PATH = "/home/student/open/churn_split_v2.sas7bdat"
 
 # -------------------------------------------------------------
