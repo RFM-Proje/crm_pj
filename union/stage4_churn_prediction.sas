@@ -4,6 +4,11 @@
   (week6a는 데이터 누수 문제로 폐기, week6d로 일원화)
   전제조건: STAGE 1, STAGE 2 실행 완료
   산출물: proj.churn_window_compare, proj.churn_split_v2, proj.churn_scored_v2
+
+  [v3 수정] churn_improvement.py 실험(30/60/90일 라벨윈도우 전부에서
+  AUC 개선 확인)에서 검증된 확장 피처 6종(이용카테고리수, 주이용카테고리
+  집중도, 재구매간격평균/표준편차, 마지막쿠폰_Used, CLV)을 정식
+  churn_split_v2 생성 과정(PART B 섹션 4)과 GRADBOOST 입력변수에 반영.
 =============================================================*/
 
 /* ============================= PART A. 90일 이탈 기준 적정성 검증 EDA ============================= */
@@ -362,6 +367,126 @@ run;
 title;
 
 
+/* -------------------------------------------------------------
+   4. [신규] 확장 피처 생성 - churn_improvement.py 실험(3개 라벨윈도우
+   30/60/90일 전부에서 AUC 개선 확인)에서 검증된 변수 6개를 정식
+   파이프라인에 반영. DACON 코드공유(고객세분화 대회) 참고.
+------------------------------------------------------------- */
+
+/* 4-1. 이용카테고리수 - cutoff 이전 구매해본 제품카테고리 종류 수 */
+proc sql;
+    create table work.customer_num_cat as
+    select 고객ID, count(distinct 제품카테고리) as 이용카테고리수
+    from work.trans_feature
+    group by 고객ID;
+quit;
+
+/* 4-2. 주이용카테고리집중도 - 가장 많이 산 카테고리 구매횟수 / 전체 구매횟수
+   (1에 가까울수록 한 카테고리에 몰빵, 낮을수록 여러 카테고리 고루 구매) */
+proc sql;
+    create table work.customer_cat_counts as
+    select 고객ID, 제품카테고리, count(*) as cnt
+    from work.trans_feature
+    group by 고객ID, 제품카테고리;
+quit;
+
+proc sql;
+    create table work.customer_cat_total as
+    select 고객ID, sum(cnt) as total_cnt, max(cnt) as top_cnt
+    from work.customer_cat_counts
+    group by 고객ID;
+quit;
+
+data work.customer_cat_ratio;
+    set work.customer_cat_total;
+    주이용카테고리집중도 = top_cnt / total_cnt;
+    keep 고객ID 주이용카테고리집중도;
+run;
+
+/* 4-3. 재구매간격평균/표준편차 - work.trans_dedup(거래 단위, cutoff 이전
+   피처 윈도우 내)의 거래일 간 간격 통계. 1번 섹션의 purchase_gap과 동일한
+   계산 로직을 cutoff 이전 데이터로 한정해서 재적용 (데이터 누수 방지) */
+proc sort data=work.trans_dedup out=work.dedup_sorted;
+    by 고객ID 거래날짜_num;
+run;
+
+data work.gap_calc;
+    set work.dedup_sorted;
+    by 고객ID;
+    retain 이전거래일;
+    if first.고객ID then do;
+        이전거래일 = 거래날짜_num;
+        gap_days = .;
+    end;
+    else do;
+        gap_days = 거래날짜_num - 이전거래일;
+        이전거래일 = 거래날짜_num;
+    end;
+    if not missing(gap_days) then output;
+    keep 고객ID gap_days;
+run;
+
+proc means data=work.gap_calc noprint nway;
+    class 고객ID;
+    var gap_days;
+    output out=work.customer_gap_stats(drop=_type_ _freq_)
+        mean=재구매간격평균 std=재구매간격표준편차;
+run;
+/* [주의] 재구매를 1번도 안 한(cutoff 이전 거래일이 하루뿐인) 고객은
+   여기서 빠짐 -> churn_split_v2에 LEFT JOIN되면서 결측(.)이 되는데,
+   GRADBOOST는 결측값을 서로게이트 분리로 처리하므로 별도 대체 없이
+   그대로 둠 (기존 CouponUseRate 등도 동일한 방식) */
+
+/* 4-4. 마지막쿠폰_Used - cutoff 이전 마지막 거래(line-item 기준 최신
+   거래일)에서 쿠폰을 실제로 썼는지 여부 */
+proc sort data=work.trans_feature out=work.trans_feature_sorted;
+    by 고객ID 거래날짜_num;
+run;
+
+data work.customer_last_coupon;
+    set work.trans_feature_sorted;
+    by 고객ID;
+    if last.고객ID;
+    마지막쿠폰_Used = (쿠폰상태 = "Used");
+    keep 고객ID 마지막쿠폰_Used;
+run;
+
+/* 4-5. CLV = 가입기간(년) x 평균구매금액 x 평균구매빈도(연 환산)
+   (DACON 코드공유 공식 그대로 적용, window_days로 Frequency를 연 단위로 환산) */
+proc sql noprint;
+    select &cutoff_date - min(거래날짜_num) into :window_days trimmed
+    from work.trans_feature;
+quit;
+%let window_days = %sysfunc(max(&window_days, 1));
+
+proc sql;
+    create table work.customer_clv as
+    select a.고객ID,
+           (e.가입기간/12) * a.AvgOrderValue * (a.Frequency / (&window_days/365)) as CLV
+    from work.customer_rfm as a
+    inner join (select distinct 고객ID, 가입기간 from proj.customer_segments) as e
+      on a.고객ID = e.고객ID;
+quit;
+
+/* 4-6. [확인용] 확장 피처 기술통계 - 계산 버그 조기 발견 목적 */
+proc means data=work.customer_num_cat n nmiss mean std min p50 max;
+    var 이용카테고리수;
+    title "4-6a. 이용카테고리수 기술통계";
+run;
+proc means data=work.customer_cat_ratio n nmiss mean std min p50 max;
+    var 주이용카테고리집중도;
+    title "4-6b. 주이용카테고리집중도 기술통계";
+run;
+proc means data=work.customer_gap_stats n nmiss mean std min p50 max;
+    var 재구매간격평균 재구매간격표준편차;
+    title "4-6c. 재구매간격 기술통계";
+run;
+proc means data=work.customer_clv n nmiss mean std min p50 max;
+    var CLV;
+    title "4-6d. CLV 기술통계";
+run;
+title;
+
 
 proc sql;
     create table work.customer_label as
@@ -391,12 +516,20 @@ proc sql;
     select a.고객ID, a.이탈여부,
            b.Recency, b.Frequency, b.Monetary, b.AvgOrderValue, b.AvgShipping,
            c.CouponUseRate, c.CouponClickRate,
-           e.가입기간, e.성별, e.고객지역
+           e.가입기간, e.성별, e.고객지역,
+           f.이용카테고리수, g.주이용카테고리집중도,
+           h.재구매간격평균, h.재구매간격표준편차,
+           i.마지막쿠폰_Used, j.CLV
     from work.customer_churn as a
     inner join work.customer_rfm as b on a.고객ID = b.고객ID
     left join work.customer_coupon as c on a.고객ID = c.고객ID
     inner join (select distinct 고객ID, 가입기간, 성별, 고객지역 from proj.customer_segments) as e
-      on a.고객ID = e.고객ID;
+      on a.고객ID = e.고객ID
+    left join work.customer_num_cat as f on a.고객ID = f.고객ID
+    left join work.customer_cat_ratio as g on a.고객ID = g.고객ID
+    left join work.customer_gap_stats as h on a.고객ID = h.고객ID
+    left join work.customer_last_coupon as i on a.고객ID = i.고객ID
+    left join work.customer_clv as j on a.고객ID = j.고객ID;
 quit;
 
 /* TRAIN/VALID 분할 (기존과 동일한 방식·seed) */
@@ -435,9 +568,12 @@ proc gradboost data=mycas.churn_split_v2
     partition rolevar=구분(TRAIN='TRAIN' VALIDATE='VALID');
     target 이탈여부 / level=nominal;
     input Recency Frequency Monetary AvgOrderValue AvgShipping
-          CouponUseRate CouponClickRate 가입기간 / level=interval;
+          CouponUseRate CouponClickRate 가입기간
+          이용카테고리수 주이용카테고리집중도
+          재구매간격평균 재구매간격표준편차
+          마지막쿠폰_Used CLV / level=interval;
     input 성별 고객지역 / level=nominal;
-    output out=mycas.churn_scored_v2 copyvars=(고객ID 이탈여부);
+    output out=mycas.churn_scored_v2 copyvars=(고객ID 이탈여부 구분);
     savestate rstore=mycas.gb_astore_v2;
     ods output VariableImportance=proj.churn_var_importance_v2
                FitStatistics=proj.churn_fit_stats_v2;
@@ -472,15 +608,37 @@ data proj.churn_scored_v2;
 run;
 
 
+/* [수정] 이전 STAGE 5에서 발견됐던 것과 동일한 데이터 누수 패턴 예방:
+   churn_scored_v2에는 이제 구분 컬럼이 있으므로, 반드시 VALID만
+   걸러서 PROC ASSESS를 돌림. 참고 비교를 위해 "섞인 채로 계산한
+   착시 AUC"도 나란히 보여줌 (0.8901처럼 비현실적으로 높게 나오면
+   그게 바로 이 착시임을 눈으로 확인하기 위함) */
 proc assess data=mycas.churn_scored_v2;
+    target 이탈여부 / event="1" level=nominal;
+    input &v2_pvar;
+    ods output ROCInfo=proj.churn_roc_v2_mixed;
+run;
+
+data mycas.churn_scored_v2_valid;
+    set mycas.churn_scored_v2(where=(구분="VALID"));
+run;
+
+proc assess data=mycas.churn_scored_v2_valid;
     target 이탈여부 / event="1" level=nominal;
     input &v2_pvar;
     ods output ROCInfo=proj.churn_roc_v2;
 run;
 
 proc sql;
-    title "7-1. 시점분리 재구성 후 AUC - 기존 0.9107과 비교";
-    select max(C) as AUC_v2 format=6.4
+    title "7-1a. [주의] TRAIN+VALID 섞어서 계산한 착시 AUC - 실제 성능 아님";
+    select max(C) as AUC_섞임_착시 format=6.4
+    from proj.churn_roc_v2_mixed;
+quit;
+title;
+
+proc sql;
+    title "7-1b. [진짜] VALID(352명)만 걸러서 계산한 실제 검증 AUC";
+    select max(C) as AUC_v2_진짜검증 format=6.4
     from proj.churn_roc_v2;
 quit;
 title;

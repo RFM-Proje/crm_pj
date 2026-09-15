@@ -6,7 +6,8 @@
   (proj.customer_segments, proj.cluster_category_top5,
    proj.churn_split_v2, proj.churn_scored_v2 필요)
   산출물: proj.customer_final_tier, proj.tier_action_summary,
-          SHAP png 4종, CAS 승격 테이블 2개
+          SHAP png 4종, CAS 승격 테이블 7개(최종등급/이탈데이터
+          +군집프로파일/코호트리텐션/일별추이/연관분석 2종)
   이 세 파일은 서로 대체 관계가 아니라 순서대로 이어지는 단계이므로
   원본 로직 변경 없이 그대로 이어붙임:
    PART A. 군집(Who) + 이탈위험등급(When) + 대표 연관구매카테고리(What)
@@ -231,38 +232,35 @@ title;
    PART B. Optuna 기반 XGBoost 튜닝 + SHAP 해석
    (원본: week7b_optuna_xgboost_shap.sas)
 
-   PROC PYTHON으로 Python 코드(pandas/optuna/xgboost/shap)를 그대로
-   감싼 것으로, PART A의 산출물과 무관하게 week6d가 만든
-   proj.churn_split_v2를 직접 로드해서 별도로 진행함.
+   [세션 격리 방식으로 재작성]
+   이 SAS 세션의 PROC PYTHON 내장 파이썬 프로세스는 이전에 이미
+   numpy를 여러 버전으로 로드한 적이 있어 더 이상 다른 버전을
+   로드할 수 없는 상태(cannot load module more than once per
+   process)가 됨. 그래서 분석 코드 자체는 "파이썬 스크립트 파일"로
+   디스크에 저장해두고, 그 파일을 매번 완전히 새로운 자식
+   프로세스(subprocess)로 실행하는 방식으로 바꿈 - 이러면 이 SAS
+   세션이 지금까지 무슨 짓을 했든 상관없이 항상 깨끗하게 돌아감.
 
-   사전 설치 필요 (SAS Studio 터미널 또는 PROC PYTHON에서):
-     pip install optuna xgboost shap pandas scikit-learn matplotlib
-
+   PART A의 산출물과 무관하게 week6d가 만든 proj.churn_split_v2를
+   직접 로드해서 별도로 진행함.
    산출물: /home/student/open/plots/ 밑에 shap_*.png 4개 저장됨
 ============================================================= */
 
-proc python;
-submit;
-"""
-Optuna 기반 XGBoost 하이퍼파라미터 튜닝
-- SAS week6d가 만든 proj.churn_split_v2 (.sas7bdat)를 pandas로 직접 로드
-- SAS에서 이미 나눈 TRAIN/VALID 분할(구분 컬럼)을 그대로 재사용 -> 공정 비교
-- 목표: SAS GRADBOOST 결과(AUC 0.8803)를 넘어서는 조합을 찾을 수 있는지 확인
-
-사전 설치 필요 (안 되어 있으면):
-    pip install optuna xgboost pandas scikit-learn
-
-[주의] 파일 경로는 이전 로그에서 확인된 패턴
-(/home/student/open/customer_segments.sas7bdat 등)을 따라
-/home/student/open/churn_split_v2.sas7bdat 로 가정했습니다.
-실제 경로가 다르면 DATA_PATH만 수정하면 됩니다.
-"""
-
+/* -------------------------------------------------------------
+   B0. 분석 스크립트를 순수 SAS DATA step으로 디스크에 작성
+   [수정] Optuna 각 trial마다 진행상황을 실시간으로 로그 파일에
+   남기도록 콜백 추가 - 실행 중에 그 파일을 직접 열어보면 몇 번째
+   trial까지 진행됐는지 바로 확인 가능 (멈췄는지 진행중인지 구분됨)
+------------------------------------------------------------- */
+data _null_;
+    infile datalines4 truncover;
+    file "/home/student/open/shap_analysis.py";
+    input;
+    put _infile_;
+datalines4;
 import sys
 import site
-# [수정] pip install --user 로 설치한 패키지(optuna, shap 등)가
-# conda 환경의 기본 sys.path에 안 잡혀서 import가 실패했던 문제 해결 -
-# user site-packages 경로를 직접 추가
+
 _user_site = site.getusersitepackages()
 if _user_site not in sys.path:
     sys.path.insert(0, _user_site)
@@ -275,30 +273,29 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from xgboost import XGBClassifier
 from sklearn.metrics import roc_auc_score
-import koreanize_matplotlib
+import shap
+
 DATA_PATH = "/home/student/open/churn_split_v2.sas7bdat"
 
-# -------------------------------------------------------------
-# 1. 데이터 로드
-# -------------------------------------------------------------
+print("numpy 버전:", np.__version__, flush=True)
+print("pandas 버전:", pd.__version__, flush=True)
+
 df = pd.read_sas(DATA_PATH, encoding="utf-8")
+print("전체 데이터 shape:", df.shape, flush=True)
+print(df["구분"].value_counts(), flush=True)
+print(df["이탈여부"].value_counts(normalize=True), flush=True)
 
-print("전체 데이터 shape:", df.shape)
-print(df["구분"].value_counts())
-print(df["이탈여부"].value_counts(normalize=True))
-
-# -------------------------------------------------------------
-# 2. 범주형 변수 인코딩 (성별, 고객지역 -> 원핫)
-#    SAS GRADBOOST는 level=nominal로 알아서 처리했지만
-#    XGBoost는 숫자 인코딩이 필요함
-# -------------------------------------------------------------
 df = pd.get_dummies(df, columns=["성별", "고객지역"], drop_first=True)
 
-# -------------------------------------------------------------
-# 3. SAS에서 만든 TRAIN/VALID 분할 그대로 재사용
-# -------------------------------------------------------------
-train = df[df["구분"] == b"TRAIN"] if df["구분"].dtype == object and isinstance(df["구분"].iloc[0], bytes) else df[df["구분"] == "TRAIN"]
-valid = df[df["구분"] == b"VALID"] if df["구분"].dtype == object and isinstance(df["구분"].iloc[0], bytes) else df[df["구분"] == "VALID"]
+def _is_bytes_col(s):
+    return s.dtype == object and len(s) > 0 and isinstance(s.iloc[0], bytes)
+
+if _is_bytes_col(df["구분"]):
+    train = df[df["구분"] == b"TRAIN"]
+    valid = df[df["구분"] == b"VALID"]
+else:
+    train = df[df["구분"] == "TRAIN"]
+    valid = df[df["구분"] == "VALID"]
 
 exclude_cols = ["고객ID", "이탈여부", "구분"]
 feature_cols = [c for c in df.columns if c not in exclude_cols]
@@ -306,15 +303,12 @@ feature_cols = [c for c in df.columns if c not in exclude_cols]
 X_train, y_train = train[feature_cols], train["이탈여부"]
 X_valid, y_valid = valid[feature_cols], valid["이탈여부"]
 
-print("TRAIN:", X_train.shape, "VALID:", X_valid.shape)
+print("TRAIN:", X_train.shape, "VALID:", X_valid.shape, flush=True)
 
-# -------------------------------------------------------------
-# 4. Optuna 목적함수 - VALID AUC 최대화
-# -------------------------------------------------------------
 def objective(trial):
     params = {
-        "n_estimators": trial.suggest_int("n_estimators", 50, 300),
-        "max_depth": trial.suggest_int("max_depth", 2, 8),
+        "n_estimators": trial.suggest_int("n_estimators", 50, 150),
+        "max_depth": trial.suggest_int("max_depth", 2, 6),
         "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.3, log=True),
         "subsample": trial.suggest_float("subsample", 0.5, 1.0),
         "colsample_bytree": trial.suggest_float("colsample_bytree", 0.5, 1.0),
@@ -322,66 +316,61 @@ def objective(trial):
         "reg_lambda": trial.suggest_float("reg_lambda", 0.0, 5.0),
         "random_state": 2026,
         "eval_metric": "logloss",
-        "use_label_encoder": False,
+        "tree_method": "hist",  # [수정] 속도 개선 - 기본(exact) 대비 훨씬 빠름
+        "n_jobs": 1,           # [수정] 사용 가능한 코어 다 사용
     }
     model = XGBClassifier(**params)
-    model.fit(X_train, y_train)
+    model.fit(X_train, y_train,
+    eval_set=[(X_valid, y_valid)],
+    early_stopping_rounds=15,
+    verbose=False,)
     preds = model.predict_proba(X_valid)[:, 1]
     return roc_auc_score(y_valid, preds)
 
+# [수정] trial마다 진행상황을 즉시 flush해서 출력 -
+# 실행 중에도 로그 파일을 열어보면 몇 번째까지 진행됐는지 보임
+def progress_cb(study, trial):
+    print(f"[trial {trial.number+1}/30] AUC={trial.value:.4f}  (지금까지 최고: {study.best_value:.4f})", flush=True)
 
+optuna.logging.set_verbosity(optuna.logging.WARNING)
 study = optuna.create_study(
     direction="maximize",
     sampler=optuna.samplers.TPESampler(seed=2026),
 )
-study.optimize(objective, n_trials=100)
+# [수정] n_trials 100 -> 30으로 축소 (trial당 90초 걸려 100번이면 2시간반 넘음.
+# 30번이면 탐색 방향은 충분히 잡히면서 시간 안에 끝남 + tree_method=hist로 속도도 개선)
+study.optimize(objective, n_trials=30, callbacks=[progress_cb],n_jobs=4)
 
-print("\n===== 튜닝 결과 =====")
-print("Best AUC (Optuna/XGBoost):", study.best_value)
-print("SAS GRADBOOST(시점분리) AUC: 0.8803  <- 비교 기준")
-print("Best params:", study.best_params)
+print("\n===== 튜닝 결과 =====", flush=True)
+print("Best AUC (Optuna/XGBoost):", study.best_value, flush=True)
+print("SAS GRADBOOST(시점분리) AUC: 0.8803  <- 비교 기준", flush=True)
+print("Best params:", study.best_params, flush=True)
 
-# -------------------------------------------------------------
-# 5. 최적 모델로 최종 확인 + 변수중요도
-# -------------------------------------------------------------
-best_model = XGBClassifier(**study.best_params, random_state=2026, eval_metric="logloss")
+best_model = XGBClassifier(**study.best_params, random_state=2026, eval_metric="logloss",
+                            tree_method="hist", n_jobs=-1)
 best_model.fit(X_train, y_train)
 final_auc = roc_auc_score(y_valid, best_model.predict_proba(X_valid)[:, 1])
-print("최종 검증 AUC:", final_auc)
+print("최종 검증 AUC:", final_auc, flush=True)
 
 importance = pd.Series(best_model.feature_importances_, index=feature_cols).sort_values(ascending=False)
-print("\n변수 중요도:\n", importance)
-
-# -------------------------------------------------------------
-# 6. XAI - SHAP 해석
-# (M6 Day7 자료 Session 5 참고, 우리 프로젝트 데이터에 맞게 적용)
-#
-# 왜 필요한가: feature_importances_는 "얼마나 중요한지" 순위만 알려줌
-# (SAS PDP로도 일부 확인했지만), SHAP은 "각 고객 개별로 어떤 변수가
-# 이탈확률을 얼마나/어느 방향으로 밀어올렸는지"까지 분해해서 보여줌.
-# 사전 설치 필요 시: pip install shap
-# -------------------------------------------------------------
-import shap
+print("\n변수 중요도:\n", importance, flush=True)
 
 explainer = shap.TreeExplainer(best_model)
 shap_values = explainer.shap_values(X_valid)
 
-# 6-1. 글로벌 해석 - 변수별 영향 방향 + 크기 (summary plot)
 shap.summary_plot(shap_values, X_valid, show=False)
 plt.tight_layout()
 plt.savefig("/home/student/open/plots/shap_summary.png", dpi=120)
 plt.close()
 
-# 6-2. 변수 중요도 막대그래프 (SHAP 기준 - feature_importances_와 비교용)
 shap.summary_plot(shap_values, X_valid, plot_type="bar", show=False)
 plt.tight_layout()
 plt.savefig("/home/student/open/plots/shap_bar.png", dpi=120)
 plt.close()
 
-# 6-3. 개별 고객 해석 - 이탈확률이 가장 높은 고객 1명 (마케팅 액션 근거로 활용 가능)
 valid_probs = best_model.predict_proba(X_valid)[:, 1]
 high_risk_pos = int(np.argmax(valid_probs))
-print(f"\n최고 위험 고객 이탈확률: {valid_probs[high_risk_pos]:.4f}")
+print(f"\n최고 위험 고객 이탈확률: {valid_probs[high_risk_pos]:.4f}", flush=True)
 
 shap.force_plot(
     explainer.expected_value, shap_values[high_risk_pos],
@@ -390,20 +379,60 @@ shap.force_plot(
 plt.savefig("/home/student/open/plots/shap_force_top_risk_customer.png", dpi=120)
 plt.close()
 
-# 6-4. 의존성 plot - Recency (SAS PDP에서도 1위 변수였음, 방향성 교차검증 목적)
 shap.dependence_plot("Recency", shap_values, X_valid, show=False)
 plt.tight_layout()
 plt.savefig("/home/student/open/plots/shap_dependence_recency.png", dpi=120)
 plt.close()
 
-print("\nSHAP 분석 완료 - 아래 파일 생성됨:")
-print("  shap_summary.png (글로벌 해석)")
-print("  shap_bar.png (변수 중요도)")
-print("  shap_force_top_risk_customer.png (최고위험 고객 1명 해석)")
-print("  shap_dependence_recency.png (Recency 방향성 - SAS PDP와 비교용)")
+print("\nSHAP 분석 완료 - 아래 파일 생성됨:", flush=True)
+print("  shap_summary.png", flush=True)
+print("  shap_bar.png", flush=True)
+print("  shap_force_top_risk_customer.png", flush=True)
+print("  shap_dependence_recency.png", flush=True)
+;;;;
+run;
 
+/* -------------------------------------------------------------
+   B1. [수정] 자식 프로세스의 출력을 실시간으로 로그 파일에 직접
+   기록 (capture_output 대신 파일로 리다이렉트) - 실행 중에
+   /home/student/open/shap_progress.log 를 열어보면 실시간 진행
+   상황이 보임. 또한 timeout=1200(20분)을 걸어서, 정말 멈춘 거라면
+   20분 뒤 강제 종료되고 에러 메시지가 뜨도록 함 (무한 대기 방지)
+------------------------------------------------------------- */
+proc python;
+submit;
+import subprocess
+import sys
+
+# [수정] pip install 체크 자체가 네트워크 문제로 멈출 수 있어서 제거함.
+# numpy==1.26.4는 이전에 이미 --user로 설치 확인된 상태라 (디스크에
+# 계속 남아있음, 세션이 바뀌어도 안 지워짐) 다시 체크할 필요 없음.
+# 혹시 정말 없는 상태라면 이 줄의 주석을 풀고 timeout=60 걸어서 쓰면 됨:
+# subprocess.run([sys.executable, "-m", "pip", "install", "--user", "numpy==1.26.4"],
+#                capture_output=True, text=True, timeout=60)
+
+log_path = "/home/student/open/shap_progress.log"
+print(f"진행상황은 이 파일에서 실시간 확인 가능: {log_path}")
+print("(SAS Studio 파일탐색기에서 이 파일을 더블클릭 -> 새로고침하면 갱신된 내용 보임)")
+
+try:
+    with open(log_path, "w") as f:
+        result = subprocess.run(
+            [sys.executable, "-u", "/home/student/open/shap_analysis.py"],
+            stdout=f, stderr=subprocess.STDOUT,
+            timeout=1800  # 20분 넘으면 강제 종료 (30 trial, hist 방식이라 15분보단 넉넉히)
+        )
+    print("\n===== 자식 프로세스 종료 (returncode:", result.returncode, ") =====")
+    with open(log_path) as f:
+        print(f.read())
+except subprocess.TimeoutExpired:
+    print("!!! 20분 초과 - 강제 종료함. 진짜로 멈춰있었던 것으로 보임 !!!")
+    with open(log_path) as f:
+        print("----- 종료 시점까지의 로그 -----")
+        print(f.read())
 endsubmit;
-quit;
+run;
+
 
 
 
@@ -423,21 +452,47 @@ quit;
 %end;
 libname mycas cas caslib="casuser";
 
-/* 최종등급 테이블 승격 (replace: 재실행 시 기존 테이블 자동 덮어쓰기) */
-proc casutil;
-    load data=proj.customer_final_tier
-         outcaslib="casuser"
-         casout="customer_final_tier"
-         promote replace;
-run;
+/* [수정] "promote replace"를 한 문장에 같이 쓰면 이 Viya 버전에서
+   "글로벌 범위 테이블을 바꿀 수 없습니다" 에러가 남 - 이미 승격된
+   테이블이 있으면 promote와 replace를 동시에 못 하는 제약.
+   해결: 승격 전에 기존 테이블을 먼저 지우고(없으면 조용히 넘어감),
+   그 다음 replace 없이 promote만 하는 매크로로 재작성 */
+%macro promote_table(dsn=, casout=);
+    proc casutil;
+        droptable casdata="&casout." incaslib="casuser" quiet;
+    run;
+    proc casutil;
+        load data=&dsn.
+             outcaslib="casuser"
+             casout="&casout."
+             promote;
+    run;
+%mend promote_table;
 
-/* 참고용 - 이탈확률/변수까지 포함된 상세 테이블도 승격 (VA에서 산점도/히스토그램용) */
-proc casutil;
-    load data=proj.churn_split_v2
-         outcaslib="casuser"
-         casout="churn_split_v2"
-         promote replace;
-run;
+/* 최종등급 테이블 */
+%promote_table(dsn=proj.customer_final_tier, casout=customer_final_tier);
+
+/* 참고용 - 이탈확률/변수까지 포함된 상세 테이블 (VA에서 산점도/히스토그램용) */
+%promote_table(dsn=proj.churn_split_v2, casout=churn_split_v2);
+
+/* -------------------------------------------------------------
+   [추가] VA에서 함께 탐색하고 싶은 다른 단계 결과물 5종 추가 승격
+------------------------------------------------------------- */
+
+/* 3주차 - 군집별 프로파일 (군집 특성 탐색용) */
+%promote_table(dsn=proj.customer_segments, casout=customer_segments);
+
+/* 3주차 - 코호트 리텐션 (히트맵을 VA에서 인터랙티브하게 재현) */
+%promote_table(dsn=proj.cohort_retention, casout=cohort_retention);
+
+/* 3주차 - 일별 지표 추이 (시계열 그래프를 VA에서 조작) */
+%promote_table(dsn=proj.daily_agg_final, casout=daily_agg_final);
+
+/* 3주차 - 연관분석 결과 (PROC ASSOC 실제 성공본 - 진짜 Apriori) */
+%promote_table(dsn=proj.assoc_rules, casout=assoc_rules);
+
+/* 3주차 - 연관분석 결과 (PROC SQL 수동 계산본 - 2개조합, 참고용) */
+%promote_table(dsn=proj.assoc_rules_manual, casout=assoc_rules_manual);
 
 /* 승격 확인 */
 proc casutil;
