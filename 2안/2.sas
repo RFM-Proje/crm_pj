@@ -48,7 +48,10 @@ proc print data=proj.customer_segments(obs=10) noobs;
     title "0-2. [확인용] customer_segments 미리보기";
 run;
 title;
-
+/* proc print data=proj.customer_segments noobs; */
+/*     title "0-2. [확인용] customer_segments 미리보기"; */
+/* run; */
+/* title; */
 
 /* -------------------------------------------------------------
    1. R, F, M 계산 (전체 관측기간 기준)
@@ -207,11 +210,37 @@ title;
 /* -------------------------------------------------------------
    4. RFMP_SCORE 계산 + 6등급 부여
 ------------------------------------------------------------- */
+/* -------------------------------------------------------------
+   4. R/F/M/P Min-Max Scaling (0~1 정규화) 후 RFMP_SCORE 계산
+------------------------------------------------------------- */
+/* 4-1. R, F, M, P의 Min/Max 값 추출 */
+proc sql noprint;
+    select min(R), max(R), min(F), max(F), min(M), max(M), min(P), max(P)
+    into :min_R, :max_R, :min_F, :max_F, :min_M, :max_M, :min_P, :max_P
+    from work.rfmp;
+quit;
+
+/* 4-2. Min-Max Scaling (R은 최근일수록 높은 점수가 되도록 반전 1 - R_norm 적용) */
 data proj.customer_rfmp;
     set work.rfmp;
-    RFMP_SCORE = R * &W_R + F * &W_F + M * &W_M + P * &W_P;
+    
+    /* Min-Max 정규화 (0~1 범위) */
+    R_norm = (R - &min_R) / (&max_R - &min_R);
+    F_norm = (F - &min_F) / (&max_F - &min_F);
+    M_norm = (M - &min_M) / (&max_M - &min_M);
+    P_norm = (P - &min_P) / (&max_P - &min_P);
+    
+    /* R은 경과일수가 적을수록 우수한 고객이므로 (1 - R_norm)으로 반전 */
+    R_score = 1 - R_norm;
+    F_score = F_norm;
+    M_score = M_norm;
+    P_score = P_norm;
+    
+    /* 정규화된 0~1 지표에 최종 가중치 적용하여 종합 점수(0~100점 스케일) 산출 */
+    RFMP_SCORE = (R_score * &W_R + F_score * &W_F + M_score * &W_M + P_score * &W_P) * 100;
 run;
 
+/* 4-3. 6등급 부여 (PROC RANK) */
 proc rank data=proj.customer_rfmp groups=6 out=proj.customer_rfmp descending;
     var RFMP_SCORE;
     ranks 등급순위;
@@ -233,21 +262,19 @@ data proj.customer_rfmp;
     drop 등급순위;
 run;
 
+/* 4-4. 정규화 적용 후 등급별 분포 및 RFMP_SCORE 분포 확인 */
 proc freq data=proj.customer_rfmp;
     tables 등급명;
-    title "4-1. RFM-P 등급별 고객 분포";
+    title "4-4. [수정후] Min-Max Scaling 적용 RFM-P 등급별 고객 분포";
 run;
 title;
 
-proc means data=proj.customer_rfmp mean min max;
+proc means data=proj.customer_rfmp mean min max std;
     class 등급명;
-    var RFMP_SCORE;
-    title "4-2. 등급별 RFMP_SCORE 범위";
+    var RFMP_SCORE R F M P;
+    title "4-5. [수정후] 등급별 RFMP_SCORE 및 원본 R/F/M/P 평균 비교";
 run;
-title;
-
-
-/* -------------------------------------------------------------
+title;/* -------------------------------------------------------------
    5. 등급별 대표카테고리
    [주의] 단순히 "등급 안에서 제일 많이 팔린 카테고리"로 뽑으면
    Apparel처럼 원래 전체 1위인 카테고리가 모든 등급에서 항상

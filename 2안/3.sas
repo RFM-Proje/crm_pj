@@ -54,10 +54,14 @@ title;
      연속된 두 주문 사이의 간격(일)을 계산
    - 재구매를 2번 이상 한 고객만 간격이 생기므로, 그 고객들만 대상
 ------------------------------------------------------------- */
+/* -------------------------------------------------------------
+   1. 고객별 재구매 간격(inter-purchase interval) 분포 - 0일 노이즈 제거
+   - 동일 날짜 중복 결제건을 제거한 고유 거래일자(distinct 거래날짜_num) 기준
+------------------------------------------------------------- */
 proc sql;
     create table work.order_dates as
-    select distinct 고객ID, 거래ID, 거래날짜_num
-    from proj.sales_with_disc;
+    select distinct 고객ID, 거래날짜_num
+    from proj.sales_clean;
 quit;
 
 proc sort data=work.order_dates;
@@ -81,21 +85,18 @@ data work.purchase_gap;
     keep 고객ID 거래날짜_num 재구매간격;
 run;
 
-/* 재구매 간격 기초통계 + 백분위수 - 90일이 P?? 에 해당하는지 직접 확인 */
 proc means data=work.purchase_gap n mean std min p10 p25 p50 p75 p90 p95 max;
     var 재구매간격;
-    title "1-1. 재구매 간격(일) 분포 - 90일이 어느 백분위수쯤인지 확인";
+    title "1-1. 재구매 간격(일) 분포 - 고유 거래일 기준";
 run;
 title;
 
-/* 90일 기준 초과/이하 비율 - "재구매 간격이 90일보다 긴 경우"가
-   전체 재구매 간격 중 얼마나 되는지 직접 카운트 */
 proc sql;
     select count(*) as 전체_재구매간격수,
            sum(case when 재구매간격 > 90 then 1 else 0 end) as 초과90일_건수,
            calculated 초과90일_건수 / calculated 전체_재구매간격수 * 100 as 초과90일_비율
     from work.purchase_gap;
-    title "1-2. 재구매 간격이 90일을 넘는 비중 (너무 크면 90일 기준이 느슨할 수 있음)";
+    title "1-2. 재구매 간격이 90일을 넘는 비중";
 quit;
 title;
 
@@ -108,8 +109,6 @@ proc sgplot data=work.purchase_gap;
     title "1-3. 재구매 간격 분포와 90일 기준선";
 run;
 title;
-
-
 /* -------------------------------------------------------------
    2. Recency 분포와 90일 기준선 (전체 고객 기준, 관측 마지막 시점)
 ------------------------------------------------------------- */
@@ -143,30 +142,26 @@ title;
      여유 있게 중간 지점으로 고정 (윈도우 간 공정 비교를 위해
      후보마다 cutoff를 다르게 잡지 않음)
 ------------------------------------------------------------- */
-%let cutoff_date = '30JUN2019'd;  /* 데이터가 2019-01-01~12-31이라는
-                                      week4 확인 결과 기준 - 본인 데이터의
-                                      실제 최초/최종 거래일에 맞게 수정 */
+/* -------------------------------------------------------------
+   3. 라벨 윈도우 후보(30/60/90/120일)별 이탈률 비교 - 버그 수정
+------------------------------------------------------------- */
+%let cutoff_date = '30JUN2019'd;
 
 %macro check_window(window=);
 
     %let label_end = %sysfunc(intnx(day, &cutoff_date, &window), date9.);
     %let label_end = "&label_end"d;
 
-    /* cutoff 이전 = 피처 기간, cutoff~label_end = 라벨 기간 */
     data work.trans_feature_&window work.trans_label_&window;
         set proj.sales_clean;
         if 거래날짜_num <= &cutoff_date then output work.trans_feature_&window;
         else if &cutoff_date < 거래날짜_num <= &label_end then output work.trans_label_&window;
     run;
 
-    /* cutoff 이전에 거래가 있던 고객(분석 대상 모집단) */
     proc sql;
         create table work.base_&window as
         select distinct 고객ID from work.trans_feature_&window;
-    quit;
-
-    /* 라벨 기간에 거래가 있으면 이탈 아님(0), 없으면 이탈(1) */
-    proc sql;
+        
         create table work.active_&window as
         select distinct 고객ID from work.trans_label_&window;
     quit;
@@ -176,12 +171,11 @@ title;
         by 고객ID;
         if a;
         이탈여부 = (not b);
-        윈도우 = &window;
     run;
 
     proc sql;
         create table work.churn_summary_&window as
-        select 윈도우,
+        select &window as 윈도우,
                count(*) as 전체고객수,
                sum(이탈여부) as 이탈고객수,
                calculated 이탈고객수 / calculated 전체고객수 * 100 as 이탈률_pct
@@ -195,13 +189,16 @@ title;
 %check_window(window=90);
 %check_window(window=120);
 
+/* 각 윈도우별 집계 결과를 단일 행씩 정식 병합 */
 data proj.churn_window_compare;
-    set work.churn_summary_30 work.churn_summary_60
-        work.churn_summary_90 work.churn_summary_120;
+    set work.churn_summary_30 
+        work.churn_summary_60 
+        work.churn_summary_90 
+        work.churn_summary_120;
 run;
 
 proc print data=proj.churn_window_compare noobs;
-    title "3-1. 라벨 윈도우별 이탈률 비교 (30/60/90/120일) - cutoff 2019-06-30 기준";
+    title "3-1. 라벨 윈도우별 이탈률 비교 (30/60/90/120일) - 정상 집계";
     var 윈도우 전체고객수 이탈고객수 이탈률_pct;
 run;
 title;
@@ -210,10 +207,9 @@ proc sgplot data=proj.churn_window_compare;
     vbar 윈도우 / response=이탈률_pct datalabel;
     xaxis label="라벨 윈도우(일)" type=discrete;
     yaxis label="이탈률(%)" grid;
-    title "3-2. 라벨 윈도우 길이에 따른 이탈률 변화 - 너무 평평하거나(변별력 없음) 극단(0%/100%)이면 그 윈도우는 부적절";
+    title "3-2. 라벨 윈도우 길이에 따른 이탈률 변화";
 run;
 title;
-
 /* -------------------------------------------------------------
    4. 해석 가이드 (주석)
    - 1번 결과에서 90일이 재구매간격 분포의 P90 근처보다 훨씬
@@ -406,12 +402,19 @@ run;
 /* 4-3. 재구매간격평균/표준편차 - work.trans_dedup(거래 단위, cutoff 이전
    피처 윈도우 내)의 거래일 간 간격 통계. 1번 섹션의 purchase_gap과 동일한
    계산 로직을 cutoff 이전 데이터로 한정해서 재적용 (데이터 누수 방지) */
-proc sort data=work.trans_dedup out=work.dedup_sorted;
+/* 4-3. 재구매간격평균/표준편차 - Cutoff 이전 고유 거래일 기준 계산 */
+proc sql;
+    create table work.feature_distinct_dates as
+    select distinct 고객ID, 거래날짜_num
+    from work.trans_feature;
+quit;
+
+proc sort data=work.feature_distinct_dates;
     by 고객ID 거래날짜_num;
 run;
 
 data work.gap_calc;
-    set work.dedup_sorted;
+    set work.feature_distinct_dates;
     by 고객ID;
     retain 이전거래일;
     if first.고객ID then do;
@@ -421,8 +424,8 @@ data work.gap_calc;
     else do;
         gap_days = 거래날짜_num - 이전거래일;
         이전거래일 = 거래날짜_num;
+        if not missing(gap_days) then output;
     end;
-    if not missing(gap_days) then output;
     keep 고객ID gap_days;
 run;
 
@@ -562,8 +565,14 @@ title;
    Recency는 이제 cutoff 시점 기준 과거정보라 안전하게 예측변수로 사용 가능
    Cluster_ID는 전체기간 데이터로 만들어져 여전히 제외
 ------------------------------------------------------------- */
+/* -------------------------------------------------------------
+   6. GRADBOOST 학습 - 과적합 방지 규제 파라미터 적용
+------------------------------------------------------------- */
 proc gradboost data=mycas.churn_split_v2
-                ntrees=100
+                ntrees=40          /* 과적합 방지를 위해 트리 수 축소 (기존 100) */
+                learningrate=0.03  /* 학습률 하향 (기존 0.1) */
+                maxdepth=3         /* 트리 깊이 제약 (기존 4) */
+                subsample=0.7      /* 표본 추출 비율 조율 */
                 seed=2026;
     partition rolevar=구분(TRAIN='TRAIN' VALIDATE='VALID');
     target 이탈여부 / level=nominal;
