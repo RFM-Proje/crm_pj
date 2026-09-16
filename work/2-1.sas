@@ -23,7 +23,7 @@ options validvarname=any;
   1. CRM 라이브러리 연결
 ------------------------------------------------------------*/
 
-libname crm "/home/student/open";
+libname crm "/home/student/crm_db";
 
 
 /*------------------------------------------------------------
@@ -751,7 +751,7 @@ options validvarname=any;
   프로그램을 실행할 때마다 LIBNAME 문장을 실행합니다.
 ------------------------------------------------------------*/
 
-libname crm "/home/student/open";
+libname crm "/home/student/crm_db";
 
 
 /* 라이브러리 할당 결과를 로그에서 확인 */
@@ -1654,7 +1654,7 @@ options validvarname=any;
   1. CRM 라이브러리 연결
 ------------------------------------------------------------*/
 
-libname crm "/home/student/open";
+libname crm "/home/student/crm_db";
 
 
 /* 라이브러리 할당 결과를 로그에서 확인 */

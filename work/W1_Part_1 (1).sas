@@ -2,7 +2,7 @@
   Week 1-1. CSV 파일 적재 및 데이터 구조 확인
 
   CSV 저장 경로:
-  /home/student/J.H._Project/M6_DATA/DATASET_CSV
+  /home/student/crm_db
 ==========================================================*/
 
 
@@ -19,11 +19,11 @@ options validvarname=any;
 ----------------------------------------------------------*/
 
 /* CSV 파일 5개가 저장된 폴더 */
-%let CSV_DIR=/home/student/open;
+%let CSV_DIR=/home/student/crm_db;
 
 /* 정제 전·후 SAS 데이터셋을 저장할 영구 라이브러리 */
 
-libname crm "/home/student/open";
+libname crm "/home/student/crm_db";
 
 
 /*----------------------------------------------------------
@@ -313,7 +313,7 @@ run;
 options validvarname=any;
 
 /* 이전 단계에서 이미 실행했다면 중복 실행해도 문제없음 */
-libname crm "/home/student/open";
+libname crm "/home/student/crm_db";
 
 
 /*----------------------------------------------------------
@@ -587,7 +587,7 @@ title;
 
 options validvarname=any;
 
-libname crm "/home/student/open";
+libname crm "/home/student/crm_db";
 
 
 /*==========================================================
@@ -1320,7 +1320,7 @@ run;
 
 options validvarname=any;
 
-libname crm "/home/student/open";
+libname crm "/home/student/crm_db";
 
 
 /*==========================================================
@@ -2092,7 +2092,7 @@ run;
 
 options validvarname=any;
 
-libname crm "/home/student/open";
+libname crm "/home/student/crm_db";
 
 
 /*==========================================================

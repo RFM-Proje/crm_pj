@@ -17,7 +17,7 @@
  
  options validvarname=any;
  
- libname crm "/home/student/open";
+ libname crm "/home/student/crm_db";
 
 
 /*----------------------------------------------------------
@@ -929,7 +929,7 @@ title;
 options validvarname=any;
 
 /* 3.1-A에서 사용한 실제 경로입니다. 경로가 다르면 이 한 줄만 수정합니다. */
-%let CRM_PATH=/home/student/open;
+%let CRM_PATH=/home/student/crm_db;
 libname crm "&CRM_PATH.";
 
 
@@ -1336,7 +1336,7 @@ run;
 options validvarname=any;
 
 /* 기존 3.1-A/B와 같은 라이브러리 경로입니다. */
-%let CRM_PATH=/home/student/open;
+%let CRM_PATH=/home/student/crm_db;
 libname crm "&CRM_PATH.";
 
 
@@ -2036,7 +2036,7 @@ title;
 
 options validvarname=any;
 
-%let CRM_PATH=/home/student/open;
+%let CRM_PATH=/home/student/crm_db;
 libname crm "&CRM_PATH.";
 
 
@@ -2716,7 +2716,7 @@ title;
 
 options validvarname=any;
 
-%let CRM_PATH=/home/student/open;
+%let CRM_PATH=/home/student/crm_db;
 libname crm "&CRM_PATH.";
 
 
@@ -3071,7 +3071,7 @@ run;
 options validvarname=any;
 
 /* 3.1~3.4에서 사용한 경로와 같습니다. */
-%let CRM_PATH=/home/student/open;
+%let CRM_PATH=/home/student/crm_db;
 libname crm "&CRM_PATH.";
 
 
