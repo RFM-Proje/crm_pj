@@ -2,7 +2,7 @@
   Week 1-1. CSV 파일 적재 및 데이터 구조 확인
 
   CSV 저장 경로:
-  /home/student/crm_db
+  /home/student/J.H._Project/M6_DATA/DATASET_CSV
 ==========================================================*/
 
 
@@ -19,7 +19,7 @@ options validvarname=any;
 ----------------------------------------------------------*/
 
 /* CSV 파일 5개가 저장된 폴더 */
-%let CSV_DIR=/home/student/crm_db;
+%let CSV_DIR=/home/student/J.H._Project/Dataset_csv;
 
 /* 정제 전·후 SAS 데이터셋을 저장할 영구 라이브러리 */
 
@@ -300,6 +300,7 @@ data _null_;
     put "======================================================";
 run;
 
+
 /*==========================================================
   Week 1-2. 한글 변수명을 영문 변수명으로 표준화
 
@@ -567,6 +568,7 @@ proc print data=crm.stg_online(obs=5);
 run;
 
 title;
+
 
 /*==========================================================
   Week 1-3. STG 테이블 데이터 프로파일링 - 전체 수정본
@@ -1299,6 +1301,7 @@ data _null_;
     put "NOTE: 여러 고객에게 사용된 거래ID가 저장됩니다.";
     put "======================================================";
 run;
+
 
 /*==========================================================
   Week 1-4. 테이블 간 데이터 정합성 검사
@@ -2079,127 +2082,238 @@ data _null_;
     put "======================================================";
 run;
 
-/*==========================================================
-  Week 1-5. 정제 테이블 생성 및 품질 플래그 추가
 
-  기본 원칙
-  1. RAW_와 STG_ 테이블은 수정하지 않음
-  2. CLEAN_ 테이블을 새로 생성
-  3. 이상치와 반품 데이터는 삭제하지 않음
-  4. 문제가 의심되는 행에 0/1 플래그를 추가
-  5. 모든 결합은 LEFT JOIN으로 수행
-==========================================================*/
+/*============================================================
+  Week 1-5. 정제 테이블 및 품질 플래그 생성
+
+  [목표]
+  Week 1-2에서 생성한 STG 테이블을 표준화하고 결합하여
+  후속 분석에서 사용하는 CLEAN 테이블을 생성한다.
+
+  [입력 테이블]
+  - CRM.STG_CUSTOMER
+  - CRM.STG_ONLINE
+  - CRM.STG_DISCOUNT
+  - CRM.STG_MARKETING
+  - CRM.STG_TAX
+
+  [주요 출력 테이블]
+  - CRM.CLEAN_CUSTOMER
+  - CRM.CLEAN_ONLINE
+  - CRM.CLEAN_DISCOUNT
+  - CRM.CLEAN_MARKETING
+  - CRM.CLEAN_TAX
+  - CRM.QA_OUTLIER_THRESHOLDS
+  - CRM.QA_FLAG_SUMMARY
+
+  [처리 원칙]
+  1. STG 테이블은 수정하지 않는다.
+  2. 이상치·반품 후보는 삭제하지 않고 플래그로 남긴다.
+  3. 기준정보는 LEFT JOIN하여 거래 상세 행을 유지한다.
+  4. 새 CLEAN_ONLINE의 행 수 검증이 끝난 뒤 영구 저장한다.
+============================================================*/
 
 options validvarname=any;
 
+
+/*------------------------------------------------------------
+  0. 라이브러리 연결
+------------------------------------------------------------*/
+
 libname crm "/home/student/crm_db";
+libname crm list;
 
 
-/*==========================================================
-  0. 이전 실행 결과 정리
+/*------------------------------------------------------------
+  1. 필수 입력 테이블 확인
+------------------------------------------------------------*/
 
-  CLEAN_ 테이블과 이번 단계의 임시 테이블만 삭제.
-  RAW_와 STG_ 테이블은 삭제하지 않고 진행함.
-==========================================================*/
+%macro require_table(ds=, previous_step=);
+
+    %if not %sysfunc(exist(&ds.)) %then %do;
+        %put ERROR: 필수 입력 테이블 &ds. 이(가) 없습니다.;
+        %put ERROR: &previous_step. 단계를 먼저 실행하십시오.;
+        %abort cancel;
+    %end;
+
+    %else %do;
+        %put NOTE: 필수 입력 테이블 &ds. 을(를) 확인했습니다.;
+    %end;
+
+%mend;
+
+%require_table(ds=crm.stg_customer,  previous_step=Week 1-2);
+%require_table(ds=crm.stg_online,    previous_step=Week 1-2);
+%require_table(ds=crm.stg_discount,  previous_step=Week 1-2);
+%require_table(ds=crm.stg_marketing, previous_step=Week 1-2);
+%require_table(ds=crm.stg_tax,       previous_step=Week 1-2);
+
+
+/*------------------------------------------------------------
+  2. 이번 실행에서 사용하는 WORK 테이블 정리
+
+  기존 CRM.CLEAN_ 테이블은 이 시점에 삭제하지 않는다.
+------------------------------------------------------------*/
 
 proc datasets library=work nolist nowarn;
     delete
-        online_standardized
-        online_enriched
-        p99_thresholds;
-quit;
-
-proc datasets library=crm nolist nowarn;
-    delete
-        clean_customer
-        clean_online
-        clean_discount
-        clean_marketing
-        clean_tax
-        qa_outlier_thresholds
-        qa_flag_summary;
+        w15_customer_new
+        w15_online_standardized
+        w15_discount_new
+        w15_marketing_new
+        w15_tax_new
+        w15_p99_thresholds
+        w15_online_enriched
+        w15_clean_online_new
+        w15_row_recon
+        w15_key_check;
 quit;
 
 
-/*==========================================================
-  1. 기준정보 CLEAN 테이블 생성
+/*============================================================
+  3. 기준정보 키 중복 사전 확인
 
-  문자값의 앞뒤 공백과 대소문자 정리를 수행
-==========================================================*/
+  중복 키가 있으면 조인 후 거래 행 수가 늘어날 수 있으므로
+  CLEAN 테이블을 만들기 전에 중단한다.
+============================================================*/
+
+proc sql;
+    create table work.w15_key_check as
+
+    select
+        "CUSTOMER_ID" as key_name length=40,
+        count(*) as duplicate_key_count
+    from (
+        select upcase(strip(customer_id)) as customer_id_std
+        from crm.stg_customer
+        group by calculated customer_id_std
+        having count(*) > 1
+    ) as customer_dup
+
+    union all
+
+    select
+        "DISCOUNT_MONTH_CATEGORY",
+        count(*)
+    from (
+        select
+            upcase(strip(discount_month))
+                as discount_month_std,
+            upcase(strip(product_category))
+                as product_category_std
+        from crm.stg_discount
+        group by
+            calculated discount_month_std,
+            calculated product_category_std
+        having count(*) > 1
+    ) as discount_dup
+
+    union all
+
+    select
+        "MARKETING_DATE",
+        count(*)
+    from (
+        select marketing_date
+        from crm.stg_marketing
+        group by marketing_date
+        having count(*) > 1
+    ) as marketing_dup
+
+    union all
+
+    select
+        "TAX_PRODUCT_CATEGORY",
+        count(*)
+    from (
+        select upcase(strip(product_category))
+            as product_category_std
+        from crm.stg_tax
+        group by calculated product_category_std
+        having count(*) > 1
+    ) as tax_dup;
+quit;
+
+title "Week 1-5 기준정보 키 중복 확인";
+proc print data=work.w15_key_check noobs;
+run;
+title;
 
 
-/*----------------------------------------------------------
-  1-1. 고객정보 정제
-----------------------------------------------------------*/
+%macro stop_if_duplicate_keys;
 
-data crm.clean_customer;
+    %local duplicate_key_total;
 
+    proc sql noprint;
+        select coalesce(sum(duplicate_key_count), 0)
+          into :duplicate_key_total trimmed
+        from work.w15_key_check;
+    quit;
+
+    %if &duplicate_key_total > 0 %then %do;
+        %put ERROR: 기준정보 테이블에 중복 키가 있습니다.;
+        %put ERROR: CRM.QA_INTEGRITY_SUMMARY와 W15_KEY_CHECK를 확인하십시오.;
+        %abort cancel;
+    %end;
+
+    %else %do;
+        %put NOTE: 기준정보 키 중복 검사를 통과했습니다.;
+    %end;
+
+%mend;
+
+%stop_if_duplicate_keys;
+
+
+/*============================================================
+  4. 고객·할인·마케팅·세금 기준정보 표준화
+
+  먼저 WORK 임시 테이블로 만든다.
+============================================================*/
+
+data work.w15_customer_new;
     set crm.stg_customer;
 
-    /* 고객ID는 영문 대문자로 통일 */
     customer_id = upcase(strip(customer_id));
-
-    /* 문자형 변수의 앞뒤 공백 제거 */
-    gender = strip(gender);
-    region = strip(region);
+    gender      = strip(gender);
+    region      = strip(region);
 
     label
         customer_id = "표준화된 고객ID"
         gender      = "성별"
         region      = "고객지역"
         tenure      = "가입기간";
-
 run;
 
 
-/*----------------------------------------------------------
-  1-2. 할인정보 정제
-----------------------------------------------------------*/
-
-data crm.clean_discount;
-
+data work.w15_discount_new;
     set crm.stg_discount;
 
-    /* 월 표기를 Jan, Feb 등의 형식으로 통일 */
-    discount_month = propcase(strip(discount_month));
-
-    /* 카테고리의 앞뒤 공백 제거 */
+    discount_month   = propcase(strip(discount_month));
     product_category = strip(product_category);
-
-    /* 쿠폰코드는 영문 대문자로 통일 */
-    coupon_code = upcase(strip(coupon_code));
+    coupon_code      = upcase(strip(coupon_code));
 
     label
-        discount_month  = "할인 적용 월"
+        discount_month   = "할인 적용 월"
         product_category = "제품카테고리"
         coupon_code      = "쿠폰코드"
         discount_pct     = "할인율";
-
 run;
 
 
-/*----------------------------------------------------------
-  1-3. 마케팅정보 정제
-----------------------------------------------------------*/
-
-data crm.clean_marketing;
-
+data work.w15_marketing_new;
     set crm.stg_marketing;
+
+    format marketing_date yymmdd10.;
 
     label
         marketing_date = "마케팅 날짜"
         offline_cost   = "오프라인 마케팅 비용"
         online_cost    = "온라인 마케팅 비용";
-
 run;
 
 
-/*----------------------------------------------------------
-  1-4. 세금정보 정제
-----------------------------------------------------------*/
-
-data crm.clean_tax;
-
+data work.w15_tax_new;
     set crm.stg_tax;
 
     product_category = strip(product_category);
@@ -2207,116 +2321,74 @@ data crm.clean_tax;
     label
         product_category = "제품카테고리"
         gst_rate         = "GST 세율";
-
 run;
 
 
-/*==========================================================
-  2. 온라인 거래 문자값 표준화
+/*============================================================
+  5. 온라인 거래 문자값과 주문키 표준화
+============================================================*/
 
-  STG_ONLINE은 수정하지 않고 WORK에 임시 테이블을 만듦.
-==========================================================*/
+data work.w15_online_standardized;
 
-data work.online_standardized;
-
-    /*기존 order_key는 표준화 전 고객ID로 만들어졌으므로,
-      삭제한 후 다시 생성한다.*/
+    /* 표준화 전 고객ID로 만든 주문키는 제외하고 다시 만든다. */
     set crm.stg_online(drop=order_key);
 
     length
-        order_key        $50
+        order_key         $50
         transaction_month $3;
 
-    /* 주요 문자형 변수의 공백과 대소문자 정리 */
     customer_id      = upcase(strip(customer_id));
     transaction_id   = strip(transaction_id);
     product_id       = strip(product_id);
     product_category = strip(product_category);
 
-    /*
-      쿠폰상태를 다음 3가지 형태로 통일
-      Clicked / Used / Not Used
-    */
-    select (upcase(strip(coupon_status)));
-
-        when ("CLICKED")
-            coupon_status = "Clicked";
-
-        when ("USED")
-            coupon_status = "Used";
-
-        when ("NOT USED")
-            coupon_status = "Not Used";
-
-        otherwise
-            coupon_status = strip(coupon_status);
-
+    /* 쿠폰상태를 세 가지 값으로 통일한다. */
+    select (upcase(compbl(strip(coupon_status))));
+        when ("CLICKED") coupon_status = "Clicked";
+        when ("USED")    coupon_status = "Used";
+        when ("NOT USED") coupon_status = "Not Used";
+        otherwise coupon_status = strip(coupon_status);
     end;
 
-
-    /* 고객ID와 거래ID를 결합한 주문키 재생성 */
+    /* 표준화한 고객ID와 거래ID로 복합 주문키를 생성한다. */
     if not missing(customer_id)
-       and not missing(transaction_id) then
-        order_key = catx(
-            "|",
-            customer_id,
-            transaction_id
-        );
+       and not missing(transaction_id)
+    then order_key = catx("|", customer_id, transaction_id);
+    else call missing(order_key);
 
-    else
-        call missing(order_key);
-
-
-    /* 거래날짜에서 Jan, Feb 형태의 월 변수 생성 */
+    /* 거래일자에서 Jan, Feb 형태의 월 코드를 생성한다. */
     if not missing(transaction_date) then
         transaction_month =
-            propcase(
-                put(transaction_date, monname3.)
-            );
+            propcase(put(transaction_date, monname3.));
+    else call missing(transaction_month);
 
-    else
-        call missing(transaction_month);
-
+    format transaction_date yymmdd10.;
 
     label
         order_key         = "고객-거래 복합키"
         transaction_month = "거래 월";
-
 run;
 
 
-/*==========================================================
-  3. 99백분위수 기준 계산
+/*============================================================
+  6. 이상치 검토용 99백분위수 계산
 
-  높은 값은 오류로 단정하지 않고 검토 대상으로 표시.
-==========================================================*/
+  높은 값을 삭제하지 않고 플래그 기준으로만 사용한다.
+============================================================*/
 
-proc means
-    data=work.online_standardized
-    noprint;
+proc means data=work.w15_online_standardized noprint;
+    var quantity avg_price shipping_fee;
 
-    var
-        quantity
-        avg_price
-        shipping_fee;
-
-    output
-        out=work.p99_thresholds(
-            drop=_type_ _freq_
-        )
-
+    output out=work.w15_p99_thresholds(drop=_type_ _freq_)
         p99=
             p99_quantity
             p99_avg_price
             p99_shipping_fee;
-
 run;
 
 
-/* 99백분위수 기준을 영구 테이블로 저장 */
 data crm.qa_outlier_thresholds;
-
-    set work.p99_thresholds;
+    set work.w15_p99_thresholds;
 
     length
         variable_name $32
@@ -2337,49 +2409,30 @@ data crm.qa_outlier_thresholds;
     p99_value     = p99_shipping_fee;
     output;
 
-    keep
-        variable_name
-        description
-        p99_value;
+    keep variable_name description p99_value;
 
     label
         variable_name = "변수명"
         description   = "설명"
         p99_value     = "99백분위수 기준값";
-
 run;
 
 
-/* 계산된 기준값 확인 */
 title "이상치 검토용 99백분위수 기준";
-
-proc print
-    data=crm.qa_outlier_thresholds
-    noobs
-    label;
+proc print data=crm.qa_outlier_thresholds noobs label;
 run;
-
 title;
 
 
-/*==========================================================
-  4. 온라인 거래와 기준정보 결합
+/*============================================================
+  7. 온라인 거래와 기준정보 결합
 
-  LEFT JOIN을 사용하므로 매칭되지 않는 거래도 유지됨.
-
-  결합 기준
-  - 고객정보: customer_id
-  - 할인정보: transaction_month + product_category
-  - 세금정보: product_category
-  - 마케팅정보: transaction_date
-==========================================================*/
+  LEFT JOIN을 사용하여 매칭되지 않은 거래도 유지한다.
+============================================================*/
 
 proc sql;
-
-    create table work.online_enriched as
-
+    create table work.w15_online_enriched as
     select
-        /* 온라인 거래 원본 변수 */
         o.order_key,
         o.customer_id,
         o.transaction_id,
@@ -2392,91 +2445,72 @@ proc sql;
         o.shipping_fee,
         o.coupon_status,
 
-        /* 고객정보 */
         c.gender,
         c.region,
         c.tenure,
 
-        /* 해당 월·카테고리에 제공된 쿠폰정보 */
-        d.coupon_code as offered_coupon_code
+        d.coupon_code
+            as offered_coupon_code
             label="제공 쿠폰코드",
 
-        d.discount_pct as offered_discount_pct
+        d.discount_pct
+            as offered_discount_pct
             label="제공 할인율",
 
-        /* 세금정보 */
         t.gst_rate,
-
-        /* 날짜별 마케팅비용 */
         m.offline_cost,
         m.online_cost,
 
-        /* 고객정보 미매칭 플래그 */
         case
             when missing(c.customer_id) then 1
             else 0
         end as flag_customer_unmatched,
 
-        /* 할인정보 미매칭 플래그 */
         case
             when missing(d.product_category) then 1
             else 0
         end as flag_discount_unmatched,
 
-        /* 세금정보 미매칭 플래그 */
         case
             when missing(t.product_category) then 1
             else 0
         end as flag_tax_unmatched,
 
-        /* 마케팅정보 미매칭 플래그 */
         case
             when missing(m.marketing_date) then 1
             else 0
         end as flag_marketing_unmatched
 
-    from work.online_standardized as o
+    from work.w15_online_standardized as o
 
-    left join crm.clean_customer as c
+    left join work.w15_customer_new as c
         on o.customer_id = c.customer_id
 
-    left join crm.clean_discount as d
-        on  o.product_category = d.product_category
+    left join work.w15_discount_new as d
+        on  upcase(o.product_category)
+            = upcase(d.product_category)
         and upcase(o.transaction_month)
             = upcase(d.discount_month)
 
-    left join crm.clean_tax as t
-        on o.product_category = t.product_category
+    left join work.w15_tax_new as t
+        on upcase(o.product_category)
+           = upcase(t.product_category)
 
-    left join crm.clean_marketing as m
+    left join work.w15_marketing_new as m
         on o.transaction_date = m.marketing_date;
-
 quit;
 
 
-/*==========================================================
-  5. 정제 플래그를 추가하여 CLEAN_ONLINE 생성
-==========================================================*/
+/*============================================================
+  8. 품질 플래그를 추가한 신규 CLEAN_ONLINE 후보 생성
+============================================================*/
 
-data crm.clean_online;
+data work.w15_clean_online_new;
 
-    /*
-      첫 번째 행을 처리할 때 99백분위수 기준값을 가져올 예정.
-      기준값은 모든 거래 행에 동일하게 적용됨.
-    */
     if _n_ = 1 then
-        set work.p99_thresholds;
+        set work.w15_p99_thresholds;
 
-    set work.online_enriched;
-
-
-    /*------------------------------------------------------
-      5-1. 핵심 변수 결측 플래그
-
-      다음 변수 중 하나라도 결측이면 1
-      - 주문키, 고객ID, 거래ID, 거래날짜
-      - 제품ID, 제품카테고리, 수량, 평균금액
-    ------------------------------------------------------*/
+    set work.w15_online_enriched;
 
     flag_missing_core = max(
         missing(order_key),
@@ -2489,90 +2523,47 @@ data crm.clean_online;
         missing(avg_price)
     );
 
-
-    /*------------------------------------------------------
-      5-2. 수량 관련 플래그
-    ------------------------------------------------------*/
-
-    /* 수량이 음수이면 반품 후보 */
     flag_return = (
         not missing(quantity)
         and quantity < 0
     );
 
-    /* 수량이 0이면 비정상 거래 후보 */
     flag_zero_quantity = (
         not missing(quantity)
         and quantity = 0
     );
 
-    /*
-      수량이 99백분위수를 초과하면 대량구매 검토 대상
-      해당 행은 삭제하지 않음
-    */
     flag_high_quantity = (
         not missing(quantity)
         and not missing(p99_quantity)
         and quantity > p99_quantity
     );
 
-
-    /*------------------------------------------------------
-      5-3. 평균금액 관련 플래그
-    ------------------------------------------------------*/
-
-    /* 평균금액이 0 이하이면 비정상 가격 후보 */
     flag_invalid_price = (
         not missing(avg_price)
         and avg_price <= 0
     );
 
-    /*
-      평균금액이 99백분위수를 초과하면 고액거래 검토 대상
-      해당 행은 삭제하지 않음
-    */
     flag_high_price = (
         not missing(avg_price)
         and not missing(p99_avg_price)
         and avg_price > p99_avg_price
     );
 
-
-    /*------------------------------------------------------
-      5-4. 배송료 관련 플래그
-    ------------------------------------------------------*/
-
-    /*
-      배송료가 99백분위수를 초과하면
-      높은 배송료 검토 대상으로 표시
-    */
     flag_high_shipping = (
         not missing(shipping_fee)
         and not missing(p99_shipping_fee)
         and shipping_fee > p99_shipping_fee
     );
 
-
-    /*------------------------------------------------------
-      5-5. 쿠폰상태 유효성 플래그
-    ------------------------------------------------------*/
-
     flag_invalid_coupon = (
         missing(coupon_status)
-        or upcase(strip(coupon_status)) not in (
+        or upcase(compbl(strip(coupon_status))) not in (
             "CLICKED",
             "USED",
             "NOT USED"
         )
     );
-
-
-    /*------------------------------------------------------
-      5-6. 전체 검토 필요 여부
-
-      아래 플래그 중 하나라도 1이면 검토 대상으로 표시합니다.
-      flag_any_review가 1이어도 행을 삭제하지 않습니다.
-    ------------------------------------------------------*/
 
     flag_any_review = max(
         flag_missing_core,
@@ -2589,348 +2580,243 @@ data crm.clean_online;
         flag_marketing_unmatched
     );
 
-
-    /* 플래그와 파생변수에 설명 추가 */
     label
-        flag_missing_core =
-            "핵심 변수 결측"
+        flag_missing_core          = "핵심 변수 결측"
+        flag_return                = "수량 음수·반품 후보"
+        flag_zero_quantity         = "수량 0"
+        flag_high_quantity         = "수량 99백분위수 초과"
+        flag_invalid_price         = "평균금액 0 이하"
+        flag_high_price            = "평균금액 99백분위수 초과"
+        flag_high_shipping         = "배송료 99백분위수 초과"
+        flag_invalid_coupon        = "예상하지 않은 쿠폰상태"
+        flag_customer_unmatched    = "고객정보 미매칭"
+        flag_discount_unmatched    = "할인정보 미매칭"
+        flag_tax_unmatched         = "세금정보 미매칭"
+        flag_marketing_unmatched   = "마케팅정보 미매칭"
+        flag_any_review            = "하나 이상의 검토 플래그 존재";
 
-        flag_return =
-            "수량 음수·반품 후보"
-
-        flag_zero_quantity =
-            "수량 0"
-
-        flag_high_quantity =
-            "수량 99백분위수 초과"
-
-        flag_invalid_price =
-            "평균금액 0 이하"
-
-        flag_high_price =
-            "평균금액 99백분위수 초과"
-
-        flag_high_shipping =
-            "배송료 99백분위수 초과"
-
-        flag_invalid_coupon =
-            "예상하지 않은 쿠폰상태"
-
-        flag_customer_unmatched =
-            "고객정보 미매칭"
-
-        flag_discount_unmatched =
-            "할인정보 미매칭"
-
-        flag_tax_unmatched =
-            "세금정보 미매칭"
-
-        flag_marketing_unmatched =
-            "마케팅정보 미매칭"
-
-        flag_any_review =
-            "하나 이상의 검토 플래그 존재";
-
-
-    /*
-      기준값은 별도의 QA_OUTLIER_THRESHOLDS에 저장했으므로
-      거래 테이블에서는 제거합니다.
-    */
     drop
         p99_quantity
         p99_avg_price
         p99_shipping_fee;
-
 run;
 
 
-/*==========================================================
-  6. STG와 CLEAN의 행 개수 비교
+/*============================================================
+  9. 신규 CLEAN_ONLINE 후보 검증
 
-- CLEAN_ONLINE의 행 개수가 늘었다면
-  기준정보 테이블의 결합키 중복을 의심할 필요가 있음.
-- 먼저 행 개수를 임시 테이블에 저장한 뒤
-  두 번째 SQL에서 차이를 계산.
-==========================================================*/
+  STG_ONLINE과 행 수가 같고 0행이 아니어야 한다.
+============================================================*/
 
-/* 이전 임시 결과가 있어도 경고 없이 삭제 */
-proc datasets library=work nolist nowarn;
-    delete row_count_base;
-quit;
-
-
-/* STG와 CLEAN의 행 개수를 먼저 저장 */
 proc sql;
-
-    create table work.row_count_base as
-
+    create table work.w15_row_recon as
     select
-        "CUSTOMER" as table_name length=15,
-        (select count(*) from crm.stg_customer)
-            as stg_rows,
-        (select count(*) from crm.clean_customer)
-            as clean_rows
+        (select count(*) from crm.stg_online)
+            as stg_online_rows label="STG_ONLINE 행 수",
 
-    from sashelp.class(obs=1)
+        (select count(*) from work.w15_clean_online_new)
+            as clean_candidate_rows label="CLEAN 후보 행 수",
 
-    union all
-
-    select
-        "ONLINE",
-        (select count(*) from crm.stg_online),
-        (select count(*) from crm.clean_online)
-
-    from sashelp.class(obs=1)
-
-    union all
-
-    select
-        "DISCOUNT",
-        (select count(*) from crm.stg_discount),
-        (select count(*) from crm.clean_discount)
-
-    from sashelp.class(obs=1)
-
-    union all
-
-    select
-        "MARKETING",
-        (select count(*) from crm.stg_marketing),
-        (select count(*) from crm.clean_marketing)
-
-    from sashelp.class(obs=1)
-
-    union all
-
-    select
-        "TAX",
-        (select count(*) from crm.stg_tax),
-        (select count(*) from crm.clean_tax)
-
+        (select count(*) from work.w15_clean_online_new)
+        - (select count(*) from crm.stg_online)
+            as row_difference label="행 수 차이"
     from sashelp.class(obs=1);
-
 quit;
 
 
-/* 저장된 행 개수를 이용하여 차이 계산 */
-title "STG와 CLEAN 행 개수 비교";
-
-proc sql;
-
-    select
-        table_name
-            label="테이블명",
-
-        stg_rows
-            label="STG 행 개수",
-
-        clean_rows
-            label="CLEAN 행 개수",
-
-        clean_rows - stg_rows
-            as row_difference
-            label="행 개수 차이"
-
-    from work.row_count_base
-
-    order by table_name;
-
-quit;
-
+title "STG_ONLINE과 CLEAN_ONLINE 후보 행 수 검산";
+proc print data=work.w15_row_recon noobs label;
+run;
 title;
 
 
-/* 확인이 끝난 임시 테이블 삭제 */
-proc datasets library=work nolist nowarn;
-    delete row_count_base;
-quit;
+%macro validate_clean_candidate;
+
+    %global W15_STG_ROWS W15_CLEAN_ROWS;
+
+    proc sql noprint;
+        select count(*)
+          into :W15_STG_ROWS trimmed
+        from crm.stg_online;
+
+        select count(*)
+          into :W15_CLEAN_ROWS trimmed
+        from work.w15_clean_online_new;
+    quit;
+
+    %if &W15_CLEAN_ROWS = 0 %then %do;
+        %put ERROR: CLEAN_ONLINE 후보 테이블의 행이 0개입니다.;
+        %abort cancel;
+    %end;
+
+    %if &W15_STG_ROWS ne &W15_CLEAN_ROWS %then %do;
+        %put ERROR: STG_ONLINE과 CLEAN_ONLINE 후보의 행 수가 다릅니다.;
+        %put ERROR: STG_ONLINE=&W15_STG_ROWS.;
+        %put ERROR: CLEAN 후보=&W15_CLEAN_ROWS.;
+        %abort cancel;
+    %end;
+
+    %put NOTE: CLEAN_ONLINE 후보 검증을 통과했습니다.;
+
+%mend;
+
+%validate_clean_candidate;
 
 
-/*==========================================================
-  7. 플래그별 건수 집계
-==========================================================*/
+/*============================================================
+  10. 검증된 CLEAN 테이블을 CRM 라이브러리에 저장
+
+  이 단계에서 기존 CLEAN 테이블을 새 결과로 교체한다.
+============================================================*/
+
+data crm.clean_customer;
+    set work.w15_customer_new;
+run;
+
+data crm.clean_discount;
+    set work.w15_discount_new;
+run;
+
+data crm.clean_marketing;
+    set work.w15_marketing_new;
+run;
+
+data crm.clean_tax;
+    set work.w15_tax_new;
+run;
+
+data crm.clean_online;
+    set work.w15_clean_online_new;
+run;
+
+
+/*============================================================
+  11. 품질 플래그 요약
+============================================================*/
 
 proc sql;
-
     create table crm.qa_flag_summary as
-
     select
-        count(*) as total_rows
-            label="전체 거래 상세 행",
-
-        sum(flag_missing_core)
-            as missing_core_count
-            label="핵심 변수 결측",
-
-        sum(flag_return)
-            as return_count
-            label="반품 후보",
-
-        sum(flag_zero_quantity)
-            as zero_quantity_count
-            label="수량 0",
-
-        sum(flag_high_quantity)
-            as high_quantity_count
-            label="수량 상위 1% 초과",
-
-        sum(flag_invalid_price)
-            as invalid_price_count
-            label="평균금액 0 이하",
-
-        sum(flag_high_price)
-            as high_price_count
-            label="평균금액 상위 1% 초과",
-
-        sum(flag_high_shipping)
-            as high_shipping_count
-            label="배송료 상위 1% 초과",
-
-        sum(flag_invalid_coupon)
-            as invalid_coupon_count
-            label="잘못된 쿠폰상태",
-
-        sum(flag_customer_unmatched)
-            as customer_unmatched_count
-            label="고객정보 미매칭",
-
-        sum(flag_discount_unmatched)
-            as discount_unmatched_count
-            label="할인정보 미매칭",
-
-        sum(flag_tax_unmatched)
-            as tax_unmatched_count
-            label="세금정보 미매칭",
-
-        sum(flag_marketing_unmatched)
-            as marketing_unmatched_count
-            label="마케팅정보 미매칭",
-
-        sum(flag_any_review)
-            as any_review_count
-            label="검토 대상 행"
-
+        count(*) as total_rows,
+        sum(flag_missing_core) as missing_core_rows,
+        sum(flag_return) as return_rows,
+        sum(flag_zero_quantity) as zero_quantity_rows,
+        sum(flag_high_quantity) as high_quantity_rows,
+        sum(flag_invalid_price) as invalid_price_rows,
+        sum(flag_high_price) as high_price_rows,
+        sum(flag_high_shipping) as high_shipping_rows,
+        sum(flag_invalid_coupon) as invalid_coupon_rows,
+        sum(flag_customer_unmatched) as customer_unmatched_rows,
+        sum(flag_discount_unmatched) as discount_unmatched_rows,
+        sum(flag_tax_unmatched) as tax_unmatched_rows,
+        sum(flag_marketing_unmatched) as marketing_unmatched_rows,
+        sum(flag_any_review) as any_review_rows
     from crm.clean_online;
-
 quit;
 
 
-/* 플래그 요약 출력 */
 title "CLEAN_ONLINE 품질 플래그 요약";
-
-proc print
-    data=crm.qa_flag_summary
-    noobs
-    label;
+proc print data=crm.qa_flag_summary noobs label;
 run;
-
 title;
 
 
-/*==========================================================
-  8. 할인정보 미매칭 카테고리 확인
-==========================================================*/
+/*============================================================
+  12. 최종 구조와 표본 확인
+============================================================*/
 
-title "할인정보가 연결되지 않은 제품카테고리";
-
-proc freq data=crm.clean_online order=freq;
-
-    where flag_discount_unmatched = 1;
-
-    tables product_category / missing;
-
+title "CRM.CLEAN_ONLINE 데이터 구조";
+proc contents data=crm.clean_online varnum;
 run;
 
-title;
 
-
-/*==========================================================
-  9. 검토 대상 표본 확인
-==========================================================*/
-
-title "하나 이상의 플래그가 있는 거래 표본 20개";
-
-proc print
-    data=crm.clean_online(obs=20)
-    label;
-
-    where flag_any_review = 1;
-
+title "CRM.CLEAN_ONLINE 앞 10행";
+proc print data=crm.clean_online(obs=10) noobs label;
     var
         order_key
+        customer_id
+        transaction_id
         transaction_date
+        product_id
         product_category
         quantity
         avg_price
         shipping_fee
         coupon_status
+        offered_discount_pct
+        gst_rate
         flag_missing_core
         flag_return
         flag_zero_quantity
-        flag_high_quantity
         flag_invalid_price
-        flag_high_price
-        flag_high_shipping
-        flag_invalid_coupon
         flag_discount_unmatched
-        flag_tax_unmatched;
-
-    format transaction_date yymmdd10.;
-
+        flag_any_review;
 run;
-
 title;
 
 
-/*==========================================================
-  10. 최종 정제 테이블 구조 확인
-==========================================================*/
+/*============================================================
+  13. 최종 생성 여부와 행 수 확인
+============================================================*/
 
-title "최종 CLEAN_ONLINE 데이터 구조";
+%global W15_MISSING_OUTPUT_COUNT;
+%let W15_MISSING_OUTPUT_COUNT=0;
 
-proc contents
-    data=crm.clean_online
-    varnum;
-run;
+%macro check_final_table(ds=);
+
+    %if not %sysfunc(exist(&ds.)) %then %do;
+        %put ERROR: 최종 산출물 &ds. 이(가) 없습니다.;
+        %let W15_MISSING_OUTPUT_COUNT=
+            %eval(&W15_MISSING_OUTPUT_COUNT + 1);
+    %end;
+
+    %else %do;
+        %put NOTE: 최종 산출물 &ds. 을(를) 확인했습니다.;
+    %end;
+
+%mend;
+
+%check_final_table(ds=crm.clean_customer);
+%check_final_table(ds=crm.clean_online);
+%check_final_table(ds=crm.clean_discount);
+%check_final_table(ds=crm.clean_marketing);
+%check_final_table(ds=crm.clean_tax);
+%check_final_table(ds=crm.qa_outlier_thresholds);
+%check_final_table(ds=crm.qa_flag_summary);
+
+
+%macro verify_final_outputs;
+
+    %if &W15_MISSING_OUTPUT_COUNT > 0 %then %do;
+        %put ERROR: 누락된 최종 산출물이 있습니다.;
+        %abort cancel;
+    %end;
+
+    proc sql noprint;
+        select count(*)
+          into :W15_FINAL_ROWS trimmed
+        from crm.clean_online;
+    quit;
+
+    %if &W15_FINAL_ROWS ne &W15_STG_ROWS %then %do;
+        %put ERROR: 최종 CLEAN_ONLINE 행 수 검증에 실패했습니다.;
+        %abort cancel;
+    %end;
+
+    %put NOTE: CRM.CLEAN_ONLINE 생성을 확인했습니다.;
+    %put NOTE: STG_ONLINE 행 수 = &W15_STG_ROWS.;
+    %put NOTE: CLEAN_ONLINE 행 수 = &W15_FINAL_ROWS.;
+
+%mend;
+
+%verify_final_outputs;
+
+
+/*============================================================
+  14. 작업 완료
+============================================================*/
 
 title;
 
-
-/*==========================================================
-  11. CLEAN_ONLINE 앞 10행 확인
-==========================================================*/
-
-title "최종 CLEAN_ONLINE 앞 10행";
-
-proc print
-    data=crm.clean_online(obs=10)
-    label;
-
-    format transaction_date yymmdd10.;
-
-run;
-
-title;
-
-
-/*==========================================================
-  12. 5단계 완료 메시지
-==========================================================*/
-
-data _null_;
-
-    put "======================================================";
-    put "NOTE: 5단계 정제 테이블 생성이 완료되었습니다.";
-    put "NOTE: RAW_ 및 STG_ 테이블은 수정되지 않았습니다.";
-    put "NOTE: 이상치와 반품 후보 행은 삭제하지 않았습니다.";
-    put "NOTE: 최종 거래 테이블: CRM.CLEAN_ONLINE";
-    put "NOTE: 고객 테이블: CRM.CLEAN_CUSTOMER";
-    put "NOTE: 할인 테이블: CRM.CLEAN_DISCOUNT";
-    put "NOTE: 마케팅 테이블: CRM.CLEAN_MARKETING";
-    put "NOTE: 세금 테이블: CRM.CLEAN_TAX";
-    put "NOTE: 이상치 기준: CRM.QA_OUTLIER_THRESHOLDS";
-    put "NOTE: 플래그 요약: CRM.QA_FLAG_SUMMARY";
-    put "======================================================";
-
-run;
-quit;
+%put NOTE: Week 1-5 정제 테이블 및 품질 플래그 생성이 완료되었습니다.;
+%put NOTE: 최종 거래 테이블은 CRM.CLEAN_ONLINE입니다.;
