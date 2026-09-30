@@ -1,42 +1,68 @@
-# crm_pj
+[README.md](https://github.com/user-attachments/files/32837268/README.md)
+<img width="960" height="364" alt="git-flow-demo-light" src="https://github.com/user-attachments/assets/c406ee8e-656f-48a8-935d-919d44799966" />
 
-https://rfm-proje.github.io/crm_pj/git-flow-detailed-rendered.html
-
-<img width="900" height="534" alt="git-flow-demo" src="https://github.com/user-attachments/assets/307549b1-fa2d-48ba-a781-4d472f290469" />
-
-# 📊 CRM Insight Hub: RFM 기반 고객 세그멘테이션 및 이탈예측 CRM 분석 플랫폼
+# 📊 CRM Insight Hub
+### RFM-P 고객가치 × 이탈 상대위험으로 "누구를, 어떻게 먼저 관리할지" 정하는 SAS CRM 분석 파이프라인
 
 [![SAS](https://img.shields.io/badge/SAS-Viya-1B7F9C?style=for-the-badge&logo=sas&logoColor=white)](https://www.sas.com/)
-[![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/PROC_PYTHON-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![scikit-learn](https://img.shields.io/badge/scikit--learn-F7931E?style=for-the-badge&logo=scikitlearn&logoColor=white)](https://scikit-learn.org/)
-[![React](https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://react.dev/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![Release](https://img.shields.io/badge/release-v3.1.0-2ea44f?style=for-the-badge)](#git-flow)
+
+<a href="https://rfm-proje.github.io/crm_pj/git-flow-detailed-rendered.html">
+  <img src="./git-flow-demo-light.gif" alt="CRM Insight Hub Git Flow" width="900">
+</a>
+
+👆 **[인터랙티브 Git Flow 열기](https://rfm-proje.github.io/crm_pj/git-flow-detailed-rendered.html)** — 커밋을 누르면 단계별 작업 내용과 산출 테이블을 볼 수 있습니다.
+
+---
+
+## ⚡ 30초 요약
+
+| | 내용 |
+| --- | --- |
+| **문제** | 이커머스 고객 1,468명 중 누가 곧 떠날지, 떠나면 손실이 큰 고객은 누구인지 알 수 없음 |
+| **데이터** | DACON 이커머스 5개 테이블 (고객 · 온라인 거래 · 할인 · 마케팅 · 세금), 2019년 1년치 |
+| **방법** | ① 거래 정제·품질 플래그 → ② 주문·고객 단위 RFM → ③ 시점분리 이탈 모형 + 구매일 기준 **RFM-P** 6등급 → ④ 가치 × 상대위험 매핑과 실행규칙 |
+| **핵심 결정** | Frequency를 주문 수가 아닌 **구매일 수(B_DAYS)** 로 정의 — VALID AUC 0.653 → **0.671**, 부트스트랩 CI 하한 > 0 |
+| **결과물** | 고객별 가치등급 · 상대위험등급 · 실행규칙 7종 · 가치보호/위험관리 **이중 운영 대기열**(50·100·200명) |
+| **정직한 한계** | TRAIN에 없던 신규 고객(311명)은 AUC ≈ 0.55 → 모델이 아닌 **운영 정책**(저비용 반응 확인)으로 관리 |
+| **재현** | `run_all.sas` 한 번으로 r1-1 → r4-1 전체 실행 + 파일별 PDF 리포트 4개 |
 
 ---
 
 ## 📋 목차
 
-1. [프로젝트 개요 및 기획 배경](#1-프로젝트-개요-및-기획-배경)
-2. [팀 구성 및 역할](#2-팀-구성-및-역할)
-3. [상세 기술 스택](#3-상세-기술-스택)
-4. [시스템 아키텍처 및 파이프라인](#4-시스템-아키텍처-및-파이프라인)
-5. [🔥 핵심 난관 및 해결 과정 (Troubleshooting)](#5-핵심-난관-및-해결-과정-troubleshooting)
-6. [프로젝트 한계 및 향후 발전 방향](#6-프로젝트-한계-및-향후-발전-방향)
-7. [디렉토리 구조](#7-디렉토리-구조)
-8. [브랜치 전략 및 협업 방식](#8-브랜치-전략-및-협업-방식)
-9. [설치 및 실행 방법](#9-설치-및-실행-방법)
+1. [프로젝트 개요 및 기획 배경](#overview)
+2. [팀 구성 및 역할](#team)
+3. [분석 파이프라인 (r1-1 → r4-1)](#pipeline)
+4. [핵심 결과](#results)
+5. [핵심 난관 및 해결 과정](#troubleshooting)
+6. [한계 및 향후 발전 방향](#limits)
+7. [디렉토리 구조](#structure)
+8. [브랜치 전략 및 협업 방식](#git-flow)
+9. [실행 방법](#run)
 
 ---
+
+<a name="overview"></a>
 
 ## 1. 📝 프로젝트 개요 및 기획 배경
 
-**"어떤 고객이 곧 떠날 것인가, 그리고 왜 떠나는가?"**
+**"어떤 고객이 곧 떠날 것인가, 그리고 그중 누구를 먼저 붙잡아야 하는가?"**
 
-CRM 담당자가 매일 마주하는 질문이지만, 실제로는 "이탈"이라는 개념 자체가 라벨링 방식에 따라 완전히 다르게 정의될 수 있다는 함정이 있습니다. 본 프로젝트는 DACON 이커머스 데이터셋을 기반으로, RFM 세그멘테이션과 이탈예측 모형을 SAS Viya 파이프라인으로 구축하고, 그 결과를 React + FastAPI 대시보드로 서비스하는 것을 목표로 합니다.
+CRM 담당자가 매일 마주하는 질문이지만, "이탈"은 라벨을 어떻게 정의하느냐에 따라 완전히 다른 답이 나옵니다. 본 프로젝트는 DACON 이커머스 데이터셋으로 SAS Viya 파이프라인을 구축해, **고객가치(RFM-P)** 와 **이탈 상대위험**을 따로 측정한 뒤 둘을 결합해 실행 가능한 운영 명단을 만듭니다.
 
-단순히 "정확도 높은 모형을 만드는 것"에 그치지 않고, **이탈 라벨 정의의 정보 누출을 발견해 수정하고, 신규 고객 구간에서 모형이 왜 무너지는지 구조적으로 규명**하는 과정 자체를 프로젝트의 핵심 산출물로 다룹니다.
+단순히 정확도 높은 모형을 만드는 데 그치지 않고, 다음 과정 자체를 핵심 산출물로 다룹니다.
+
+- 이탈 라벨의 **정보 누출(leakage)** 을 발견하고 시점분리 방식으로 재설계
+- Frequency 정의를 **A·B·C 실험**으로 비교해 근거를 갖고 선택
+- 신규 고객 구간에서 모형이 **왜 무너지는지** 구조적으로 규명하고, 모델 대신 운영 정책으로 대응
+- 모든 단계에 **QA 게이트**(검증 실패 시 삭제 대신 중단)를 두어 재실행해도 같은 결과가 나오도록 설계
 
 ---
+
+<a name="team"></a>
 
 ## 2. 👥 팀 구성 및 역할
 
@@ -45,62 +71,96 @@ CRM 담당자가 매일 마주하는 질문이지만, 실제로는 "이탈"이�
 | **skybluewindy** | **총괄 & 대시보드** | RFM 피처 설계, K-Means 클러스터링, 이탈예측 모형(A/B/C 비교), 시각화 |
 | **eogks1235-byte** | **모델링 & 대시보드** | Git 연동 및 모델 비교 실험 공동 진행, 진단·검증 파이프라인, 시각화 |
 
-*(SAS_Preliminary는 SAS 예비 파이프라인 작업 브랜치입니다 — 브랜치 전략 참고)*
-
 ---
 
-## 3. 🛠 상세 기술 스택
+<a name="pipeline"></a>
 
-### 데이터 · 모델링
+## 3. ⚙️ 분석 파이프라인 (r1-1 → r4-1)
 
-- **SAS Viya**: `PROC SQL`, `PROC PYTHON`, `PROC LOGISTIC`, `PROC FOREST`, `PROC GRADBOOST`, `PROC SGPLOT`
-- **Python (SAS Viya `PROC PYTHON` 내)**: pandas, numpy, scikit-learn (LogisticRegression, RandomForestClassifier, GradientBoostingClassifier), scipy.stats
-- **RFM 세그멘테이션**: Recency / Frequency / Monetary 로그변환 + 표준화, K-Means (K=4, LOG_FM 버전)
-- **이탈예측**: 시간 분리(TRAIN/VALID) 기반 로지스틱 회귀 및 트리 앙상블 비교, 부트스트랩 신뢰구간 기반 모형 선택
-
-### 대시보드
-
-- **Backend**: FastAPI
-- **Frontend**: React
-
-### 진단 · 검증 도구
-
-- VIF(분산팽창지수), PSI(Population Stability Index), KS 검정, 부트스트랩 AUC 신뢰구간
-
----
-
-## 4. ⚙️ 시스템 아키텍처 및 파이프라인
-
-8주 파이프라인으로 구성되어 있으며, 데이터 정제부터 대시보드 서빙까지 이어집니다.
+4개 SAS 파일이 앞 단계의 결과 테이블을 입력으로 받아 순서대로 이어집니다.
 
 ```mermaid
 flowchart TD
-    subgraph Week1_2["Week 1-2: 데이터 정제"]
-        A1[Customer_info / Discount_info<br>Marketing_info / Onlinesales_info / Tax_info] --> B[클린징 및 유효거래 필터링]
+    subgraph R1["r1-1 · Week 1 정제"]
+        A[CSV 5종] --> B[RAW_] --> C[STG_<br>영문 변수 · order_key] --> D[정합성 17종<br>QA] --> E[CLEAN_<br>품질 플래그 13종]
     end
-
-    subgraph Week3["Week 3: RFM & 클러스터링"]
-        B --> C[RFM 원본·로그변환·표준화]
-        C --> D[K-Means 클러스터링 K=4]
+    subgraph R2["r2-2 · Week 2 RFM"]
+        E --> F[W2_ORDER_BASE<br>주문 단위] --> G[W2_RFM<br>고객 RFM] --> H[W2_CUSTOMER_FEATURES<br>할인·고객 피처]
     end
-
-    subgraph Week4_5["Week 4-5: 심화 분석"]
-        D --> E[변화점·코호트·연관규칙 분석]
+    subgraph R3["r3-1 · Week 3 모델링"]
+        H --> I[3.1 로그변환·K 비교]
+        E --> J[3.2 시점분리<br>TRAIN · VALID] --> K[3.3 누수 방지 GBM]
+        J --> L[3.2-A~3.4<br>Frequency A·B·C] --> M{B_DAYS 채택}
+        M --> N[3.5~3.9 RFM-P<br>6등급 Bronze~VIP]
     end
-
-    subgraph Week6["Week 6: 이탈예측"]
-        E --> F{시간 분리 TRAIN/VALID}
-        F --> G[A_ORDERS / B_DAYS / C_BOTH 비교]
-        G --> H[PROC LOGISTIC / FOREST / GRADBOOST]
-    end
-
-    subgraph Week7_8["Week 7-8: 서빙"]
-        H --> I[FastAPI 서버]
-        I --> J[React 대시보드]
+    subgraph R4["r4-1 · Week 4 인사이트"]
+        M --> O[4.1 상대위험 점수]
+        N --> P[4.2 가치 × 위험<br>실행규칙 7종]
+        O --> P --> Q[4.3 순위 안정성] --> R[4.4 이중 운영 대기열]
     end
 ```
 
+| 파일 | 단계 | 하는 일 | 주요 산출 테이블 |
+| --- | --- | --- | --- |
+| `r1-1.sas` | Week 1-1 ~ 1-5 | CSV 적재 → 영문 표준화 → 프로파일링 → 정합성 17종 → 정제·품질 플래그 (이상치·반품은 삭제하지 않고 플래그) | `CLEAN_ONLINE` 외 4종, `QA_INTEGRITY_SUMMARY`, `QA_FLAG_SUMMARY` |
+| `r2-2.sas` | Week 2-1 ~ 2-3 | 상품 행 → 주문 단위 (배송료 1회 반영) → 고객 RFM → 할인 파생변수 결합, PROC PYTHON EDA | `W2_ORDER_BASE`, `W2_RFM`, `W2_CUSTOMER_FEATURES` |
+| `r3-1.sas` | WBS 3.1 ~ 3.9 | 로그변환·표준화, 시점분리 이탈 라벨, 누수 방지 모형, Frequency A·B·C 실험, 구매일 기준 RFM-P 재산출 | `W3_CHURN_SPLIT_V2`, `W3_FREQUENCY_POLICY`, `W3_CUSTOMER_RFMP_PY`, `W3_CUSTOMER_ANALYTIC_BASE_PY` |
+| `r4-1.sas` | WBS 4.1 ~ 4.4 | B_DAYS 모형 재현·상대위험 점수 → 가치 × 위험 매핑 → 순위 안정성 검증 → 이중 운영 대기열과 종료 판단 | `W4_41_CURRENT_SCORED`, `W4_42_CUSTOMER_ACTION`, `W4_44_FINAL_ROSTER` |
+| `run_all.sas` | 전체 | 4개 파일 순차 실행 + 파일별 결과 PDF 저장 | `r1-1_result.pdf` ~ `r4-1_result.pdf` |
+
+### 설계 원칙
+
+- **식별자**: 거래ID가 여러 고객에게 재사용되므로 주문 키는 `order_key = 고객ID | 거래ID`
+- **시점분리**: TRAIN은 2019-06-30까지의 행동으로 이후 90일 이탈을, VALID는 2019-10-02까지로 이후 90일 이탈을 예측
+- **가치와 위험 분리**: RFM-P는 "얼마나 중요한 고객인가", 이탈모형은 "얼마나 떠날 것 같은가"를 따로 측정
+- **확률보다 순위**: 예측확률이 실제 이탈률보다 낮게 나와 절대확률 대신 **상대위험 순위**만 사용
+- **QA 게이트**: 각 단계 끝에 PASS / REVIEW / FAIL 판정, FAIL이면 `%abort`로 중단
+
 ---
+
+<a name="results"></a>
+
+## 4. 📈 핵심 결과
+
+### ① Frequency 정의: 주문 수 대신 구매일 수
+
+| 모형 | Frequency 정의 | VALID AUC | 판정 |
+| --- | --- | --- | --- |
+| A_ORDERS | 주문 수 | 0.653 | 기준 |
+| **B_DAYS** | **서로 다른 구매일 수** | **0.671** | **채택** — B−A 부트스트랩 95% CI 하한 > 0 |
+| C_BOTH | 둘 다 | B와 비슷 | 추가 개선 미미 |
+
+`frequency_days`는 WBS 3.4의 6개 게이트(QA 0건 · 중복 0건 · 자동 권고 · AUC 우위 · CI 하한 > 0 · Brier 비악화)를 통과해 공식 Frequency가 되었고, 이후 RFM-P 등급도 이 정의로 다시 계산했습니다.
+
+### ② RFM-P 고객가치 6등급
+
+- 지표별 K-means(R=3 · F=4 · M=2 · P=4) → 군집 변동계수(CV)의 역수로 가중치 산정
+- 가중 점수를 6분위로 나눠 **Bronze · Silver · Gold · Platinum · Diamond · VIP**
+- P(제품가치)는 카테고리별 구매일 수 × 평균단가로 계산해 "비싼 카테고리를 자주 사는 고객"을 반영
+
+### ③ 가치 × 상대위험 실행규칙
+
+| 규칙 | 대상 | 실행 |
+| --- | --- | --- |
+| NEW_LOW_COST_TEST | 구매 이력 90일 미만 신규 고객 | 고비용 혜택 없이 대표 카테고리 반응 확인 |
+| HIGH_VALUE_RETENTION | High 위험 · VIP/Diamond | 개별 유지 제안 우선 검토 |
+| TARGETED_RETENTION | High 위험 · Platinum/Gold | 대표 카테고리 중심 제한적 맞춤 혜택 |
+| LOW_COST_REACTIVATION | High 위험 · 그 외 | 자동 알림 중심 저비용 재활성화 |
+| LOYALTY_CROSSSELL | Medium 위험 · VIP/Diamond | 대표 카테고리 기반 교차판매 |
+| CATEGORY_REMINDER | Medium 위험 · 그 외 | 개인 대표 카테고리 리마인드 |
+| MAINTAIN_MONITOR | Low 위험 | 과도한 할인 없이 관계 유지 |
+
+### ④ 이중 운영 대기열 (WBS 4.4)
+
+- **VALUE_PROTECTION**: 가치 백분위 × 위험 백분위가 큰 순 → 손실이 큰 고객부터 보호
+- **RISK_PREVENTION**: 순수 위험 순위 → 떠날 가능성이 큰 고객에게 저비용 조치
+- 각 대기열 상위 **50 · 100 · 200명**을 시험 운영 규모로 표시
+- 4.3 검증: 공식 점수와 50:50 대안 점수의 상위 대상 중복률 ≥ 70% → 순위 **STABLE**
+- 최종 판단 `CLOSE_WBS4_PILOT_READY` — 소규모 시험 운영 준비 완료 (ROI는 대조군 실험 전까지 확정하지 않음)
+
+---
+
+<a name="troubleshooting"></a>
 
 ## 5. 🔥 핵심 난관 및 해결 과정 (Troubleshooting)
 
@@ -156,137 +216,241 @@ VIF(분산팽창지수)로 원인을 확인한 결과, `observation_days`(VIF=25
 
 ---
 
+### Hurdle 7. 가치와 위험이 같은 정보를 공유하는 문제
+
+RFM-P(가치)와 이탈모형(위험)은 둘 다 `recency` · `frequency_days` · `monetary`를 사용합니다. 두 점수를 곱해 우선순위를 만들면 같은 정보가 두 번 반영될 수 있어, WBS 4.3에서 공통 변수의 선형효과를 제거한 **잔차 Spearman 상관**과 원 상관을 비교하고, 곱셈 점수와 50:50 평균 점수의 **상위 50·100·200명 중복률**을 확인했습니다. 중복률이 기준(70%)을 넘어 현재 우선순위를 유지하되, 두 점수가 완전히 독립적이지 않다는 점은 인사이트 표의 "한계"에 명시했습니다.
+
+---
+
+### Hurdle 8. 재실행할 때마다 결과가 달라질 위험
+
+조인 키가 중복되면 거래 행이 조용히 불어나고, 중간 실패 시 이전 결과와 새 결과가 섞일 수 있습니다. 그래서 모든 단계를 **"WORK에서 후보 생성 → 검증 → 통과 시에만 CRM에 저장"** 구조로 바꾸고(예: 1-5 키 중복 게이트, 3.1-B 14행 검증), 검증 실패 시 데이터를 지우는 대신 `%abort`로 멈추도록 했습니다. 마지막으로 `run_all.sas`로 전체를 한 번에 재실행해 PDF로 결과를 남깁니다.
+
+---
+
 ### 결론
 
 VALID_NEW 구간의 성능 한계는 **threshold, 피처, 알고리즘 어느 것으로도 해소되지 않는 구조적 한계**로 확인되었습니다. 근본 원인은 신규 고객의 관측기간이 짧아 발생하는 정보 부족(cold-start)이며, 이는 모델링으로 극복할 문제가 아니라 **운영 정책으로 다뤄야 할 문제**라는 결론에 도달했습니다.
 
 ---
 
-## 6. 🚧 프로젝트 한계 및 향후 발전 방향
+
+<a name="limits"></a>
+
+## 6. 🚧 한계 및 향후 발전 방향
 
 ### 현재 한계
 
-- **신규 고객(cold-start) 예측 한계**: 관측기간이 짧은 고객에 대해서는 AUC 0.55 내외로, 사실상 유의미한 판별력을 기대하기 어렵습니다.
-- **거래 로그 중심 피처**: RFM류 피처만으로는 "왜 이탈하는지"에 대한 설명력이 제한적입니다. 고객센터 문의, 앱 체류시간, 마케팅 반응률 같은 행동 신호가 없습니다.
-- **표본 크기**: TRAIN 900명 규모로, 복잡한 모형(트리 앙상블)은 과적합에 취약했습니다(GradientBoosting TRAIN AUC 0.91 vs VALID_NEW AUC 0.55).
+- **신규 고객(cold-start)**: 관측기간이 짧은 고객은 AUC 0.55 내외로 판별력이 거의 없습니다 → 실행규칙 1번(저비용 반응 확인)으로만 관리합니다.
+- **확률 보정 미완료**: 평균 예측확률이 실제 이탈률보다 낮아 절대 이탈확률로 해석할 수 없습니다. 현재는 상대 순위만 사용합니다.
+- **고객 단위 독립 검증 아님**: TRAIN과 VALID에 같은 고객이 포함될 수 있어, 결과는 시험 운영 대상 선정에만 사용합니다.
+- **거래 로그 중심 피처**: 고객센터 문의, 앱 체류시간, 캠페인 반응 같은 행동 신호가 없어 "왜 떠나는지"에 대한 설명력이 제한적입니다.
 
 ### 향후 발전 방향
 
-1. **이원화 운영 정책**: 기존 고객은 모형 기반 우선순위 스코어링, 신규 고객(`is_short_window=1`)은 룰 기반 임시 관리로 분리.
-2. **ROI 손익분기 분석**: 캠페인 비용·성공률은 데이터만으로 알 수 없으므로, 절대 ROI 대신 "어떤 비용·전환율 조건에서 이득인지"를 보여주는 민감도 분석 제공.
-3. **비정형 데이터 결합**: 고객센터 로그, 이메일/푸시 반응 데이터를 추가해 cold-start 문제를 완화.
-4. **재학습 주기 도입**: 신규 고객이 충분한 관측기간을 확보하는 시점마다 재평가하는 롤링 재학습 구조.
+1. **대조군 실험**: 두 대기열을 소규모로 운영하고 대조군과 비교해 실제 반응률 · 비용 · 증분가치(ROI)를 측정
+2. **확률 보정**: Platt scaling / isotonic 보정 후 절대확률 기반 기준선 검토
+3. **롤링 재학습**: 신규 고객이 충분한 관측기간을 확보하는 시점마다 재평가
+4. **대시보드**: 고객별 등급 · 위험 · 실행규칙을 조회하는 React + FastAPI 화면
 
 ---
+
+<a name="structure"></a>
 
 ## 7. 📂 디렉토리 구조
 
 ```
-📦 CRM Insight Hub (crm_pj)
- ┣ 📂 SAS/                                      # SAS Viya 파이프라인 스크립트
- ┃ ┣ 📜 3.1-A_RFM_준비.sas                        # RFM 원본·로그변환·표준화
- ┃ ┣ 📜 3.1-B_K_비교.sas                          # K-Means 군집 수 비교
- ┃ ┣ 📜 WBS_3.2-A_FREQUENCY_ABC_INPUT.sas         # Frequency 정의 비교용 피처 생성
- ┃ ┣ 📜 WBS_3.2-B_재구매주기_진단.sas               # 관측 윈도우 가설 검증
- ┃ ┣ 📜 WBS_3.2-C_단건구매_진단.sas                 # 단건구매 고객 가설 검증
- ┃ ┣ 📜 WBS_3.3-A_FREQUENCY_ABC_COMPARE.sas       # A/B/C 모형 비교
- ┃ ┣ 📜 WBS_3.3-B_THRESHOLD_TUNING.sas            # Threshold 튜닝
- ┃ ┣ 📜 WBS_3.3-C_PSI_DRIFT_CHECK.sas             # 피처 드리프트(PSI) 진단
- ┃ ┣ 📜 WBS_3.3-D_TRUNCATION_PROOF.sas            # 관측기간 구조적 절단 검증
- ┃ ┣ 📜 WBS_3.3-E_WINDOW_FEATURE_RETRAIN.sas      # 관측기간 정규화 피처 재학습
- ┃ ┣ 📜 WBS_3.3-F_TREE_MODEL_COMPARE.sas          # 트리 모형 비교
- ┃ ┗ 📜 WBS_3.3-G_VIF_CHECK.sas                   # 다중공선성(VIF) 진단
- ┣ 📂 dashboard-frontend/                        # React 대시보드
- ┣ 📂 dashboard-backend/                         # FastAPI 서버
+📦 crm_pj
+ ┣ 📂 sas/
+ ┃ ┣ 📜 r1-1.sas            # Week 1  CSV 적재 · 표준화 · 정합성 · 정제
+ ┃ ┣ 📜 r2-2.sas            # Week 2  주문 단위 · RFM · 고객 피처 · EDA
+ ┃ ┣ 📜 r3-1.sas            # Week 3  군집 · 이탈모형 · Frequency 실험 · RFM-P
+ ┃ ┣ 📜 r4-1.sas            # Week 4  상대위험 · 실행규칙 · 안정성 · 운영 대기열
+ ┃ ┗ 📜 run_all.sas         # 4개 파일 일괄 실행 + PDF 리포트
+ ┣ 📜 git-flow-detailed-rendered.html   # 인터랙티브 Git Flow (GitHub Pages)
+ ┣ 📜 git-flow-demo-light.gif           # README 상단 애니메이션
  ┣ 📜 LICENSE
  ┗ 📜 README.md
 ```
 
 ---
 
+<a name="git-flow"></a>
+
 ## 8. 🔀 브랜치 전략 및 협업 방식
 
-Feature Branch 기반의 3단계 Git Flow(`feature → dev → main`)를 따릅니다. SAS Studio ↔ GitHub Git 연동을 통해 팀원과 동기화합니다.
+[인터랙티브 Git Flow](https://rfm-proje.github.io/crm_pj/git-flow-detailed-rendered.html)에서 커밋별 작업 내용과 산출 테이블을 확인할 수 있습니다.
+
+Git Flow(`feature → dev → release → main`, 긴급 수정은 `hotfix → main`)를 따르며, 마지막 `run_all.sas`까지 `release/v3.1`을 거쳐 `main`에 배포했습니다. 기능 브랜치는 SAS 파일(r1-1 · r2-2 · r3-1 · r4-1)의 WBS 작업 단위로 나누고, `dev`에는 PR로만 병합합니다. SAS Studio ↔ GitHub Git 연동으로 팀원과 동기화합니다.
+
+| 브랜치 | 갈라진 곳 | 병합 대상 | 커밋 | 역할 |
+| --- | --- | --- | --- | --- |
+| `main` | — | — | 6 | 배포 가능한 산출물만 올라가는 브랜치. 릴리스 태그가 붙습니다. |
+| `hotfix/*` | `main` | `main`, `dev` | 1 | main에서 바로 따서 고치는 긴급 수정 브랜치. |
+| `release/*` | `dev` | `main`, `dev` | 4 | dev를 동결하고 전 단계 재실행·QA를 확인하는 릴리스 브랜치. |
+| `dev` | `main` | — | 14 | 모든 기능 브랜치가 PR로 모이는 통합 브랜치. |
+| `feature/w1-data-cleansing` | `dev` | `dev` | 6 | r1-1.sas · Week 1-1~1-5 CSV 적재부터 CLEAN_ 테이블까지. |
+| `feature/w2-rfm-base` | `dev` | `dev` | 5 | r2-2.sas · Week 2-1~2-3 주문·고객 RFM과 고객 피처. |
+| `feature/w3-rfm-cluster` | `dev` | `dev` | 3 | r3-1.sas · 3.1-A/B 로그변환·표준화와 K 비교. |
+| `feature/w3-churn-model` | `dev` | `dev` | 5 | r3-1.sas · WBS 3.2~3.3 시점분리 이탈 라벨과 누수 방지 모형. |
+| `experiment/w3-frequency-abc` | `dev` | `dev` | 4 | r3-1.sas · WBS 3.2-A~3.4 Frequency 정의 A·B·C 실험. |
+| `feature/w3-rfmp-v2` | `dev` | `dev` | 6 | r3-1.sas · WBS 3.5~3.9 구매일 기준 RFM-P 재산출. |
+| `feature/w4-risk-scoring` | `dev` | `dev` | 2 | r4-1.sas · WBS 4.1 B_DAYS 기준모형 검증과 상대위험 점수. |
+| `feature/w4-action-design` | `dev` | `dev` | 5 | r4-1.sas · WBS 4.2~4.4 가치×위험 실행규칙과 운영 대기열. |
+
+### 전체 흐름
 
 ```mermaid
 gitGraph
-    commit id: "initial commit"
+    commit id: "init"
     branch dev
+    commit id: "Setup dev 브랜치 + SAS Studio Git 연동"
+    branch feature/w1-data-cleansing
+    commit id: "Week 1-1 CSV 5종 적재 → RAW_"
+    commit id: "Week 1-2 영문 변수명 표준화 + order_key"
+    commit id: "Week 1-3 STG 데이터 프로파일링"
+    commit id: "Week 1-4 테이블 간 정합성 17개 검사"
+    commit id: "Week 1-5 CLEAN_ 테이블 + 품질 플래그"
+    commit id: "Week 1-5 안전장치: 키 중복 게이트 + 검증 후 저장"
     checkout dev
-    commit id: "dev setup"
-
-    branch DH
-    checkout DH
-    commit id: "RFM 피처 설계"
-    commit id: "K-Means 클러스터링"
-    commit id: "이탈 라벨 정의"
-
+    merge feature/w1-data-cleansing
+    branch feature/w2-rfm-base
+    commit id: "Week 2-1 주문 단위 테이블"
+    commit id: "Week 2-2 고객 RFM 지표"
+    commit id: "Week 2-2 주문 ↔ RFM 합계 검산"
+    commit id: "Week 2-3 고객정보·할인 파생변수 결합"
+    commit id: "Week 2-3 PROC PYTHON 고객 EDA"
     checkout dev
-    branch SAS_Preliminary
-    checkout SAS_Preliminary
-    commit id: "데이터 정제"
-    commit id: "PROC SQL 파이프라인"
-    commit id: "예비 검증"
-
-    checkout dev
-    branch JH
-    checkout JH
-    commit id: "React 대시보드"
-    commit id: "FastAPI 연동"
-    commit id: "시각화 구현"
-
-    checkout dev
-    merge DH id: "DH → dev"
-    merge SAS_Preliminary id: "SAS_Preliminary → dev"
-    merge JH id: "JH → dev"
-
+    merge feature/w2-rfm-base
+    branch release/v1.0
+    commit id: "release/v1.0 · 데이터 마트 동결" type: HIGHLIGHT
     checkout main
-    merge dev id: "dev → main"
+    merge release/v1.0 tag: "v1.0.0"
+    checkout dev
+    merge release/v1.0
+    branch feature/w3-rfm-cluster
+    commit id: "3.1-A RFM 로그변환·표준화"
+    checkout dev
+    branch feature/w3-churn-model
+    commit id: "WBS 3.2 이탈 윈도우 30/60/90/120일 비교"
+    commit id: "WBS 3.2 시점분리 TRAIN·VALID 스냅샷"
+    checkout feature/w3-rfm-cluster
+    commit id: "3.1-B K=2~8 군집 수 비교"
+    checkout feature/w3-churn-model
+    commit id: "WBS 3.2 확장 피처 6종 + QA"
+    commit id: "WBS 3.3 누수 방지 Gradient Boosting"
+    checkout feature/w3-rfm-cluster
+    commit id: "3.1-B K=4를 참고 후보로 강등"
+    checkout feature/w3-churn-model
+    commit id: "WBS 3.3 VALID 기준 성능 평가"
+    checkout dev
+    merge feature/w3-rfm-cluster
+    merge feature/w3-churn-model
+    branch experiment/w3-frequency-abc
+    commit id: "WBS 3.2-A Frequency 두 정의 비교 피처"
+    commit id: "WBS 3.3-A A·B·C 로지스틱 비교"
+    commit id: "WBS 3.4 B_DAYS 공식 후보 게이트"
+    commit id: "WBS 3.4 '%p' 매크로 오인 경고 제거" type: REVERSE
+    checkout dev
+    merge experiment/w3-frequency-abc
+    branch feature/w3-rfmp-v2
+    commit id: "WBS 3.5 전체기간 F + 제품가치 P"
+    commit id: "WBS 3.6 지표별 K-means + CV 가중치"
+    commit id: "WBS 3.7 RFMP 점수와 6개 등급"
+    commit id: "WBS 3.8 등급 프로파일 + 대표 카테고리"
+    commit id: "WBS 3.9 고객 분석 테이블 + QA"
+    commit id: "WBS 3.5~3.9 누락 본문 복원 + 매크로 순서" type: REVERSE
+    checkout dev
+    merge feature/w3-rfmp-v2
+    branch release/v2.0
+    commit id: "release/v2.0 · 세그먼트·이탈모형" type: HIGHLIGHT
+    checkout main
+    merge release/v2.0 tag: "v2.0.0"
+    checkout dev
+    merge release/v2.0
+    branch feature/w4-risk-scoring
+    commit id: "WBS 4.1 B_DAYS 기준모형 재현·검증"
+    commit id: "WBS 4.1 전체 고객 상대위험 점수"
+    checkout dev
+    merge feature/w4-risk-scoring
+    branch feature/w4-action-design
+    commit id: "WBS 4.2 가치 × 상대위험 매핑"
+    commit id: "WBS 4.2 실행규칙 7개"
+    commit id: "WBS 4.3 정보 중복·순위 안정성 검증"
+    commit id: "WBS 4.4 이중 운영 대기열"
+    commit id: "WBS 4.4 핵심 인사이트 + 종료 판단"
+    checkout dev
+    merge feature/w4-action-design
+    branch release/v3.0
+    commit id: "release/v3.0 · 인사이트·파일럿" type: HIGHLIGHT
+    checkout main
+    merge release/v3.0 tag: "v3.0.0"
+    checkout dev
+    merge release/v3.0
+    checkout main
+    branch hotfix/crm-db-path
+    commit id: "Hotfix 라이브러리 경로 통일"
+    checkout main
+    merge hotfix/crm-db-path tag: "v3.0.1"
+    checkout dev
+    merge hotfix/crm-db-path
+    commit id: "Build run_all.sas 일괄 실행 + PDF 리포트"
+    branch release/v3.1
+    commit id: "release/v3.1 · 일괄 실행 배포" type: HIGHLIGHT
+    checkout main
+    merge release/v3.1 tag: "v3.1.0"
 ```
+
+### 릴리스 기준
+
+| 태그 | 포함 범위 | 릴리스 전 확인 |
+| --- | --- | --- |
+| `v1.0.0` | r1-1, r2-2 · RAW → STG → CLEAN → W2 데이터 마트 | CLEAN_ONLINE 행 수 = STG_ONLINE, 주문↔RFM 합계 차이 0 |
+| `v2.0.0` | r3-1 · 3.1 ~ 3.9 세그먼트·이탈모형·RFMP | 3.4 B_DAYS 게이트 6개 통과, RFMP QA FAIL 0 |
+| `v3.0.0` | r4-1 · 4.1 ~ 4.4 상대위험·실행규칙·운영 대기열 | 4.4 판단 `CLOSE_WBS4_PILOT_READY` |
+| `v3.0.1` | hotfix · 라이브러리 경로 `crm_db1 → crm_db` 통일 | 로직 변경 없음 |
+| `v3.1.0` | `run_all.sas` 일괄 실행 + 파일별 PDF 리포트 | PDF 4개(`r1-1` ~ `r4-1_result.pdf`) 생성 |
+
+4.4의 판단이 `RETURN_TO_4_1` 또는 `RETURN_TO_4_2_4_3`이면 해당 단계로 돌아가 재실행한 뒤 다시 PR을 올립니다.
 
 ### 커밋 컨벤션
 
-| 태그 | 용도 |
-| --- | --- |
-| `feat:` | 새 기능/피처 추가 |
-| `fix:` | 버그 수정 |
-| `refactor:` | 코드 구조 개선 (동작 변화 없음) |
-| `docs:` | 문서·주석만 변경 |
-| `data:` | 데이터 파이프라인·테이블 변경 |
+| 태그 | 용도 | 예시 |
+| --- | --- | --- |
+| `feat:` | 새 분석 단계·테이블 추가 | `feat(w3-3.3A): A_ORDERS · B_DAYS · C_BOTH 로지스틱 비교` |
+| `fix:` | 오류 수정 | `fix(w3-3.4): '3 퍼센트포인트' 매크로 오인 경고 제거` |
+| `refactor:` | 결과는 같고 구조·안전장치 개선 | `refactor(w1-5): 조인 전 키 중복 게이트` |
+| `test:` | 검산·안정성 검증 | `test(w2-2): Frequency·Monetary 합계 차이 0 검산` |
+| `build:` | 실행 스크립트·리포트 | `build: run_all.sas 추가` |
+| `docs:` | 문서·주석만 변경 | `docs: README 브랜치 전략 갱신` |
+| `chore:` | 설정·경로 등 기타 | `chore(dev): SAS Studio Git 연동` |
 
 ---
 
-## 9. 🚀 설치 및 실행 방법
+<a name="run"></a>
 
-### SAS Viya 파이프라인 실행
+## 9. 🚀 실행 방법
 
-```bash
-# SAS Studio에서 순서대로 실행
-# 1) RFM 준비 및 클러스터링
-3.1-A_RFM_준비.sas
-3.1-B_K_비교.sas
+### 사전 준비
 
-# 2) Frequency 정의 비교 및 모형 선택
-WBS_3.2-A_FREQUENCY_ABC_INPUT.sas
-WBS_3.3-A_FREQUENCY_ABC_COMPARE.sas
+1. SAS Studio(SAS Viya)에 DACON CSV 5종(`Customer_info`, `Onlinesales_info`, `Discount_info`, `Marketing_info`, `Tax_info`)을 올립니다.
+2. `r1-1.sas`의 `CSV_DIR`과 각 파일의 `libname crm` / `%let CRM_PATH` 경로를 본인 환경에 맞춥니다. (기본값 `/home/student/crm_db`)
 
-# 3) 진단(선택) — VALID_NEW 성능 원인 규명이 필요할 때
-WBS_3.2-B_재구매주기_진단.sas
-WBS_3.2-C_단건구매_진단.sas
-WBS_3.3-D_TRUNCATION_PROOF.sas
-WBS_3.3-G_VIF_CHECK.sas
+### 한 번에 실행 (권장)
+
+`run_all.sas` 상단의 경로 두 줄만 고친 뒤 전체 실행(F3)합니다.
+
+```sas
+%let CODE_DIR=/home/student/crm_code;   /* r1-1 ~ r4-1.sas 가 있는 폴더 */
+%let PDF_PARENT=/home/student;
+%let PDF_NAME=abcdefg;                  /* PDF 저장 폴더 */
 ```
 
-### 대시보드 실행
+- 실행 순서: `r1-1 → r2-2 → r3-1 → r4-1`
+- 결과: `/home/student/abcdefg/r1-1_result.pdf` ~ `r4-1_result.pdf` (표 · 그래프)
+- 각 파일의 코드를 고쳐도 `run_all.sas`는 다시 만들 필요가 없습니다 (`%include`가 실행 시점의 파일을 읽음).
+- 중간 단계의 QA가 FAIL이면 `%abort`로 멈추므로 LOG에서 원인을 먼저 확인합니다.
 
-```bash
-# Backend (FastAPI)
-cd dashboard-backend
-pip install -r requirements.txt
-python main.py
+### 단계별 실행
 
-# Frontend (React)
-cd dashboard-frontend
-npm install
-npm run dev
-```
+같은 순서로 `r1-1.sas` → `r2-2.sas` → `r3-1.sas` → `r4-1.sas`를 하나씩 실행해도 됩니다. 각 파일은 시작할 때 필요한 입력 테이블이 있는지 확인합니다.
