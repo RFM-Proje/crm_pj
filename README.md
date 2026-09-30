@@ -1,5 +1,5 @@
 ## 8. 🔀 브랜치 전략 및 협업 방식
-
+file:///C:/Users/USER/Downloads/gitflow_A_v3.1.0/git-flow-detailed-rendered.html
 <a href="https://rfm-proje.github.io/crm_pj/git-flow-detailed-rendered.html">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="./git-flow-demo-dark.gif">
