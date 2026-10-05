@@ -1,4 +1,4 @@
-[README.md](https://github.com/user-attachments/files/32837268/README.md)
+
 <img width="960" height="364" alt="git-flow-demo-light" src="https://github.com/user-attachments/assets/c406ee8e-656f-48a8-935d-919d44799966" />
 
 # 📊 CRM Insight Hub
