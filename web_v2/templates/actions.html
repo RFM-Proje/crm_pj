@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Action Queue{% endblock %}
+{% block crumb %}{% endblock %}
+{% block heading %}Action Queue{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="filters">
+    <span class="fl">캠페인</span>
+    <div class="chips">
+      <a class="chip {{ 'on' if not args.get('c') }}" href="{{ qlink(c=None) }}">전체 고객</a>
+      {% for k, name in campaigns %}<a class="chip {{ 'on' if args.get('c')==k }}" href="{{ qlink(c=k) }}">{{ name }}</a>{% endfor %}
+    </div>
+    <span class="fl">가치 등급</span>
+    <div class="chips">{% for t in tiers %}<a class="chip {{ 'on' if args.get('tier')==t }}" href="{{ qlink(tier=None if args.get('tier')==t else t) }}">{{ t }}</a>{% endfor %}</div>
+    <span class="fl">이탈 위험</span>
+    <div class="chips">{% for r in risks %}<a class="chip {{ 'on' if args.get('risk')==r }}" href="{{ qlink(risk=None if args.get('risk')==r else r) }}">{{ r }}</a>{% endfor %}</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-head"><div><h3>대상 고객 {{ total|num }}명</h3></div>
+    <a class="btn primary" href="{{ qlink(endpoint='export') }}">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 4v11m0 0l-4-4m4 4l4-4M5 19h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      발송용 CSV 내려받기</a></div>
+  <div class="scroll"><table class="tbl">
+    <tr><th class="r">순위</th><th>가명</th><th>등급</th><th>위험</th><th>캠페인</th><th>다음 발송</th><th>대표 카테고리</th><th class="r">2019년 매출</th></tr>
+    {% for _, r in rows.iterrows() %}
+    <tr><td class="r">{{ loop.index }}</td>
+      <td><a class="name" href="{{ url_for('customer', q=r['customer_id']) }}">{{ r['name'] }}</a> <small style="color:var(--muted)">{{ r['customer_id'] }}</small></td>
+      <td><span class="tier {{ r['rfmp_tier'] }}">{{ r['rfmp_tier'] }}</span></td>
+      <td><span class="tag {{ r['relative_risk_grade'] }}">{{ r['relative_risk_grade'] }}</span></td>
+      <td><span class="tag accent">{{ r['campaign'] }}</span></td><td>{{ r['next_send'] }}</td><td>{{ r['top_category'] }}</td>
+      <td class="r">{{ r['revenue_ex_gst']|money }}</td></tr>
+    {% endfor %}
+  </table></div>
+</div>
+{% endblock %}

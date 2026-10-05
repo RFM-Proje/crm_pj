@@ -1,0 +1,41 @@
+{% from "_logo.html" import logo %}
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+  <title>{% block title %}CP 진단 리포트{% endblock %} · CP 2기</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+  <script src="{{ url_for('static', filename='js/chart.umd.min.js') }}"></script>
+</head>
+<body class="app">
+  <aside class="side">
+    <a class="brand" href="{{ url_for('splash') }}">{{ logo(38, "side-logo") }}<div><b>CP <em class="gen">2기</em></b><small>CRM Pioneer</small></div></a>
+    <nav>
+      <p class="nav-cap">대시보드</p>
+      <a href="{{ url_for('overview') }}" class="{{ 'on' if active=='overview' }}"><i>①</i>Executive 요약<em class="nav-tag">WHY</em></a>
+      <a href="{{ url_for('journey') }}" class="{{ 'on' if active=='journey' }}"><i>②</i>여정·퍼널<em class="nav-tag">WHERE</em></a>
+      <a href="{{ url_for('simulator') }}" class="{{ 'on' if active=='simulator' }}"><i>③</i>실행 플랜<em class="nav-tag">HOW</em></a>
+      <a href="{{ url_for('actions') }}" class="{{ 'on' if active=='actions' }}"><i>④</i>Action Queue<em class="nav-tag">WHAT</em></a>
+      <a href="{{ url_for('customer') }}" class="{{ 'on' if active=='customer' }}"><i>⑤</i>Customer 360<em class="nav-tag">WHO</em></a>
+    </nav>
+    <div class="side-foot">
+      <span class="dot"></span>데이터 기간 2019년 1월 ~ 12월<br>고객 {{ S.customers|num }}명 · 구매일 {{ S.purchase_days|num }}일
+    </div>
+  </aside>
+  <div class="main">
+    <header class="top">
+      <div>{% if self.crumb() %}<p class="crumb">{% block crumb %}{% endblock %}</p>{% endif %}<h1>{% block heading %}{% endblock %}</h1></div>
+      <form class="search" action="{{ url_for('customer') }}">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M20 20l-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <input name="q" data-ac placeholder="고객명 또는 ID 검색 (예: 손흥민, USER_0118)" autocomplete="off">
+      </form>
+    </header>
+    <section class="content">{% block content %}{% endblock %}</section>
+  </div>
+  <script src="{{ url_for('static', filename='js/search.js') }}"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}실행 플랜{% endblock %}
+{% block crumb %}{% endblock %}
+{% block heading %}실행 플랜{% endblock %}
+{% block content %}
+{% set R = {} %}{% for r in rules %}{% set _ = R.update({r.action_rule_id: r}) %}{% endfor %}
+{% set E = {} %}{% for e in exps %}{% set _ = E.update({e.key: e}) %}{% endfor %}
+{% set T1, T2 = triggers %}
+
+<h2 class="sec-h"><span class="sec-no" style="--c: var(--ink-2)">1</span>이 매장은 어떤 곳인가</h2>
+<div class="grid g4">
+  <div class="card kpi"><div class="label">Nest 스마트홈 기기 매출 비중</div><div class="value">{{ store.nest_rev|pct }}</div>
+    <div class="note">첫 구매에 Nest가 들어간 고객 {{ store.nest_first|pct }}</div></div>
+  <div class="card kpi lilac"><div class="label">대량 주문 고객의 매출 비중</div><div class="value">{{ store.bulk_rev|pct }}</div>
+    <div class="note">하루 100개 이상 주문한 고객 {{ store.bulk_n|num }}명 · 전체의 {{ store.bulk_share|pct }}</div></div>
+  <div class="card kpi warnc"><div class="label">1~10월 평균 대비 11~12월 매출</div><div class="value">+{{ store.q4_lift|pct }}</div>
+</div>
+  <div class="card kpi ok"><div class="label">주요 카테고리 쿠폰 사용률</div><div class="value">{{ store.used_min|pct }}~{{ store.used_max|pct }}</div>
+    <div class="note">상품 1줄당 할인 전 금액 · 쿠폰 사용 {{ store.basket_used|money }} · 미사용 {{ store.basket_not|money }}</div></div>
+</div>
+
+<h2 class="sec-h"><span class="sec-no" style="--c: var(--mint)">2</span>캠페인 플레이북: 여정 단계별로 한 가지씩</h2>
+<div class="grid g3">
+  <div class="exp" style="--ec: var(--mint)">
+    <div class="eh"><b>신규 온보딩</b> <span class="tag mint" style="margin-left:6px">Activation</span>
+      <p>한 번 산 고객이 두 번째로 오게 합니다. 북극성 지표를 직접 움직이는 캠페인입니다.</p></div>
+    <div class="eb">
+      <div class="row-kv"><span>대상</span><b>첫 구매 90일 미만 신규 · {{ R[1].n }}명</b></div>
+      <div class="row-kv"><span>보내는 때</span><b>첫 구매 D+{{ T1 }}, D+{{ T2 }}</b></div>
+      <div class="row-kv"><span>채널</span><b>이메일 + 앱 푸시</b></div>
+      <div class="row-kv"><span>메시지</span><b style="font-weight:500; font-size:13px; text-align:right">첫 구매 카테고리 인기·신상품</b></div>
+      <div class="row-kv"><span>혜택</span><b>없음</b></div>
+      <div class="row-kv"><span>성공 지표</span><b>90일 두 번째 구매율 {{ S.conv90|pct(1) }} →</b></div>
+    </div>
+  </div>
+
+  <div class="exp" style="--ec: var(--guard)">
+    <div class="eh"><b>고가치 고객 윈백</b> <span class="tag guard" style="margin-left:6px">Revenue · Win-back</span>
+      <p>처음에 크게 사고 오래 돌아오지 않은 고객을 담당자가 직접 되찾아 옵니다. 목표는 신규 온보딩과 같은 두 번째 구매입니다.</p></div>
+    <div class="eb">
+      <div class="row-kv"><span>대상</span><b>가치 상위 · 위험 High · {{ R[2].n + R[3].n }}명</b></div>
+      <div class="row-kv"><span>특징</span><b style="font-weight:500; font-size:13px; text-align:right">{{ S.wb_one|pct }} 한 번만 구매 · {{ S.wb_bulk|pct }} 대량 주문</b></div>
+      <div class="row-kv"><span>보내는 때</span><b>위험 등급이 High로 바뀐 즉시</b></div>
+      <div class="row-kv"><span>채널</span><b>담당자 이메일·전화</b></div>
+      <div class="row-kv"><span>메시지</span><b style="font-weight:500; font-size:13px; text-align:right">대량 주문 고객: 지난 주문 그대로 재주문 · 전담 상담<br>그 외: 첫 구매 카테고리 신상품</b></div>
+      <div class="row-kv"><span>혜택</span><b>개별 혜택 · 혜택을 쓰는 유일한 캠페인</b></div>
+      <div class="row-kv"><span>성공 지표</span><b>90일 재구매율 {{ E.guard.base|pct(1) }} →</b></div>
+    </div>
+  </div>
+
+  <div class="exp" style="--ec: var(--accent)">
+    <div class="eh"><b>자동 재방문 알림</b> <span class="tag accent" style="margin-left:6px">Retention</span>
+      <p>평소 오던 때를 넘긴 고객에게 대표 카테고리 소식을 자동으로 보냅니다.</p></div>
+    <div class="eb">
+      <div class="row-kv"><span>대상</span><b>위험 High·Medium 기존 고객 · {{ R[4].n + R[5].n + R[6].n }}명</b></div>
+      <div class="row-kv"><span>보내는 때</span><b style="text-align:right">평소 구매 간격의 1.5배 경과<br><span style="font-weight:500; font-size:12.5px">구매일 1~2일 고객은 D+{{ T2 }} 이후 바로</span></b></div>
+      <div class="row-kv"><span>채널</span><b>앱 푸시·이메일 자동 발송</b></div>
+      <div class="row-kv"><span>메시지</span><b style="font-weight:500; font-size:13px; text-align:right">대표 카테고리 재입고·신상품 · 관련 상품</b></div>
+      <div class="row-kv"><span>혜택</span><b>없음</b></div>
+      <div class="row-kv"><span>성공 지표</span><b>90일 재구매율 {{ E.auto.base|pct(1) }} →</b></div>
+    </div>
+  </div>
+
+  <div class="exp" style="--ec: #8467EE">
+    <div class="eh"><b>연말 재주문</b> <span class="tag" style="margin-left:6px; background:var(--lilac-soft); color:#8467EE">Revenue · 시즌</span>
+      <p>단체 굿즈를 주문했던 고객에게 연말 수요 전에 다시 주문하기 쉽게 만들어 줍니다.</p></div>
+    <div class="eb">
+      <div class="row-kv"><span>대상</span><b>대량 주문 고객 {{ store.bulk_n|num }}명</b></div>
+      <div class="row-kv"><span>보내는 때</span><b>11~12월 피크 전, 10월 마지막 주</b></div>
+      <div class="row-kv"><span>채널</span><b>담당자 이름의 이메일</b></div>
+      <div class="row-kv"><span>메시지</span><b style="font-weight:500; font-size:13px; text-align:right">지난 주문 그대로 다시 주문 · 연말 단체 선물 카탈로그</b></div>
+      <div class="row-kv"><span>혜택</span><b>수량별 가격 안내 · 일괄 할인 없음</b></div>
+      <div class="row-kv"><span>성공 지표</span><b>4분기 재주문율 · 주문 수량</b></div>
+    </div>
+  </div>
+
+  <div class="exp" style="--ec: var(--line)">
+    <div class="eh"><b>관계 유지</b> <span class="tag" style="margin-left:6px">유지</span>
+      <p>위험이 낮은 고객은 건드리지 않는 것이 전략입니다. 과한 알림은 수신 거부를 부릅니다.</p></div>
+    <div class="eb">
+      <div class="row-kv"><span>대상</span><b>위험 Low · {{ R[7].n }}명</b></div>
+      <div class="row-kv"><span>보내는 때</span><b>월 1회</b></div>
+      <div class="row-kv"><span>채널</span><b>뉴스레터</b></div>
+      <div class="row-kv"><span>메시지</span><b style="font-weight:500; font-size:13px; text-align:right">신상품 소식</b></div>
+      <div class="row-kv"><span>혜택</span><b>없음</b></div>
+      <div class="row-kv"><span>성공 지표</span><b>수신 거부율 · 위험 등급 유지</b></div>
+    </div>
+  </div>
+
+</div>
+
+<h2 class="sec-h" id="exp"><span class="sec-no" style="--c: #8467EE">3</span>실험 설계: 무엇으로 성공을 판단하나</h2>
+<div class="grid g3">
+  {% for e in exps %}
+  <div class="exp" style="--ec: {{ e.color }}">
+    <div class="eh"><b>{{ e.name }}</b> <span class="tag" style="margin-left:6px">{{ e.stage }}</span>
+      <p><b>가설</b> {{ e.hyp }}</p></div>
+    <div class="eb">
+      <div class="row-kv"><span>사업 지표</span><b>{{ e.metric }}</b></div>
+      <div class="row-kv"><span>가드레일</span><b style="font-weight:500; font-size:13px; text-align:right">{{ e.guard }}</b></div>
+      <div class="row-kv"><span>기준값</span><b>{{ e.base|pct(1) }}</b></div>
+      <div class="row-kv"><span>한 집단 표본 · {{ e.n_note }}</span><b>{{ e.n_arm|num }}명</b></div>
+      <div class="row-kv"><span>가려낼 수 있는 최소 효과</span><b>+{{ (e.mde*100)|round(1) }}%p</b></div>
+      <div class="row-kv"><span>+5%p를 가려내는 데 필요한 표본</span><b>집단당 {{ e.need5|num }}명</b></div>
+    </div>
+    {% if e.n_arm >= e.need5 %}
+    <div class="verdict ok">표본이 충분합니다. 한 번의 캠페인으로 +5%p 효과를 확인할 수 있습니다.</div>
+    {% elif e.key == 'onboard' %}
+    <div class="verdict weak">1년 유입으로는 +{{ (e.mde*100)|round|int }}%p 이상만 확인됩니다. +5%p를 보려면 약 {{ (e.need5 * 2 / (S.annual_new / 12))|round|int }}개월치 유입이 필요해, 30일 재구매처럼 더 빨리 반응하는 지표를 보조로 씁니다.</div>
+    {% else %}
+    <div class="verdict weak">대상이 적어 +{{ (e.mde*100)|round|int }}%p 미만의 효과는 우연과 구분되지 않습니다. 여러 분기 결과를 누적하거나, 재구매 매출처럼 차이가 크게 나는 지표를 함께 봅니다.</div>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

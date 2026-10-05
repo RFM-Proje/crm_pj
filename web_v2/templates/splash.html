@@ -1,0 +1,53 @@
+{% from "_logo.html" import logo %}
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+  <title>CP · CRM Pioneer</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+</head>
+<body class="splash">
+  <div class="splash-bg"><div class="glow g1"></div><div class="glow g2"></div><div class="glow g3"></div><div class="grid"></div></div>
+  <main class="splash-center">
+    {{ logo(148, "splash-logo") }}
+    <h1 class="wordmark">CP</h1>
+    <p class="fullname">CRM&nbsp;PIONEER</p>
+    <p class="tagline">첫 구매 고객을 두 번째 구매로 이끄는 이커머스 CRM 대시보드</p>
+
+    <div class="loader" aria-live="polite">
+      <div class="loader-track"><div class="loader-bar" id="bar"></div></div>
+      <div class="loader-meta"><span id="step">데이터 연결 중</span><span id="pct">0%</span></div>
+    </div>
+
+    <a href="{{ url_for('overview') }}" class="enter-btn" id="enter">
+      <span>진단 리포트 시작하기</span>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor"
+           stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </a>
+  </main>
+  <footer class="splash-foot">Team CP · 2019 Online Sales · 고객 {{ S.customers|num }}명 · 분석 ID 익명화, 화면 표시명은 가명</footer>
+
+  <script>
+    const steps = [[0, "데이터 연결 중"], [22, "구매일 단위로 정리 중"], [45, "RFMP 가치 등급 계산 중"],
+                   [68, "상대 이탈위험 순위 매핑 중"], [88, "캠페인 명단 구성 중"], [100, "리포트 준비 완료"]];
+    const bar = document.getElementById("bar"), pct = document.getElementById("pct"),
+          step = document.getElementById("step"), enter = document.getElementById("enter");
+    const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const t0 = performance.now(), dur = reduce ? 1 : 2600;
+    function tick(t) {
+      const p = Math.max(0, Math.min(1, (t - t0) / dur)), e = 1 - Math.pow(1 - p, 3), v = Math.round(e * 100);
+      bar.style.width = v + "%"; pct.textContent = v + "%";
+      step.textContent = steps.filter(s => v >= s[0]).pop()[1];
+      if (p < 1) requestAnimationFrame(tick); else { document.body.classList.add("ready"); }
+    }
+    requestAnimationFrame(tick);
+    // 백그라운드 탭 등으로 애니메이션 프레임이 멈춰도 버튼은 반드시 나타나게 한다
+    setTimeout(() => { bar.style.width = "100%"; pct.textContent = "100%"; step.textContent = steps[steps.length - 1][1];
+                       document.body.classList.add("ready"); }, reduce ? 50 : dur + 400);
+    document.addEventListener("keydown", e => { if (e.key === "Enter" && document.body.classList.contains("ready")) enter.click(); });
+  </script>
+</body>
+</html>

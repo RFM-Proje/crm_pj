@@ -1,0 +1,27 @@
+{# CP (CRM Pioneer) 로고: 나침반 링 + 산 정상 + 깃발 + 점선 등반로 #}
+{% macro logo(size=120, cls="") %}
+<svg class="cp-logo {{ cls }}" width="{{ size }}" height="{{ size }}" viewBox="0 0 120 120" fill="none"
+     xmlns="http://www.w3.org/2000/svg" role="img" aria-label="CRM Pioneer 로고">
+  <defs>
+    <linearGradient id="cpRing" x1="0" y1="0" x2="120" y2="120" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#93A8FF"/><stop offset="1" stop-color="#5B7CFA"/>
+    </linearGradient>
+    <linearGradient id="cpFlag" x1="72" y1="22" x2="92" y2="36" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFC08A"/><stop offset="1" stop-color="#FF8E6B"/>
+    </linearGradient>
+  </defs>
+  <circle class="draw ring" cx="60" cy="60" r="52" stroke="url(#cpRing)" stroke-width="3"/>
+  <g class="ticks" stroke="url(#cpRing)" stroke-width="3" stroke-linecap="round">
+    <line x1="60" y1="4" x2="60" y2="12"/><line x1="60" y1="108" x2="60" y2="116"/>
+    <line x1="4" y1="60" x2="12" y2="60"/><line x1="108" y1="60" x2="116" y2="60"/>
+  </g>
+  <path class="draw mountain" d="M22 86 L48 52 L58 64 L72 44 L98 86 Z" stroke="currentColor" stroke-width="3.2"
+        stroke-linejoin="round"/>
+  <path class="draw snow" d="M66 52 L72 44 L78 53" stroke="currentColor" stroke-width="3.2" stroke-linejoin="round"
+        stroke-linecap="round"/>
+  <path class="trail" d="M36 98 C46 90 50 84 56 78 S66 64 72 46" stroke="#2DBE9F" stroke-width="2.2"
+        stroke-dasharray="3 5" stroke-linecap="round"/>
+  <line class="draw pole" x1="72" y1="44" x2="72" y2="20" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+  <path class="flag" d="M72 21 L92 27 L72 34 Z" fill="url(#cpFlag)"/>
+</svg>
+{% endmacro %}

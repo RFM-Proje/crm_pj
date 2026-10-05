@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}여정·퍼널{% endblock %}
+{% block crumb %}{% endblock %}
+{% block heading %}여정·퍼널{% endblock %}
+{% block content %}
+{% set T1, T2 = triggers %}
+
+<div class="card">
+  <div class="card-head"><div><h3>고객 여정 지도: 우리 데이터로 볼 수 있는 구간</h3></div></div>
+  <div class="jmap">
+    <div class="jstep no"><b>탐색</b>상품 조회·검색<em>데이터 없음</em></div>
+    <div class="jstep half"><b>가입</b>회원 가입<em>가입 개월 수만 있음</em></div>
+    <div class="jstep"><b>신청·개통</b>= 첫 구매<em>2019년 관측 첫 구매</em></div>
+    <div class="jstep"><b>이용</b>= 첫 구매 후 경과<em>경과일·카테고리</em></div>
+    <div class="jstep focus"><b>재탐색 → 재이용</b>= 두 번째 구매<em>가장 크게 새는 곳</em></div>
+    <div class="jstep"><b>반복 이용</b>= 3회 이상 구매<em>구매일 수·주기</em></div>
+    <div class="jstep no"><b>추천</b>공유·추천 가입<em>데이터 없음</em></div>
+  </div>
+</div>
+
+<div class="grid g2">
+  <div class="card kpi ok"><div class="label">첫 구매 다음 날까지 재구매</div><div class="value">{{ J.d1|pct(1) }}</div>
+    <div class="note">첫 방문에 이어서 산 고객</div></div>
+  <div class="card kpi warnc"><div class="label">D+{{ T2 }}까지 두 번째 구매</div><div class="value">{{ J.c30|pct(1) }}</div>
+    <div class="note">아직 {{ J.unconv[T2]|pct }}가 돌아오지 않음</div></div>
+</div>
+
+<div class="grid g2">
+  <div class="card">
+    <div class="card-head"><div><h3>첫 구매 고객 {{ J.n|num }}명의 {{ obs_h }}일 구매 단계 퍼널</h3></div></div>
+    <div class="funnel">
+      {% for n in J.steps %}
+      <div class="frow {{ 'leak' if loop.index == 2 }}">
+        <span class="fl">{{ loop.index }}회 구매</span>
+        <div class="fbar"><i style="width: {{ (n / J.steps[0] * 100)|round(1) }}%">{{ n|num }}명</i></div>
+        <span class="fr">{% if loop.first %}<b>100%</b>{% else %}<b>{{ J.step_rate[loop.index0]|pct(1) }}</b>
+          <span class="drop">−{{ (J.steps[loop.index0 - 1] - n)|num }}명</span>{% endif %}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><div><h3>주별 두 번째 구매 확률</h3></div></div>
+    <div style="height:240px"><canvas id="weekly" aria-label="주별 두 번째 구매 확률과 리마인드 발송 시점"></canvas></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-head"><div><h3>온보딩 리마인드 규칙</h3></div></div>
+  <div class="grid g2">
+    <div class="rule"><small>첫 알림</small><b>D+{{ T1 }}</b>
+      <p><span>받는 고객</span>아직 두 번째 구매가 없는 고객</p></div>
+    <div class="rule"><small>두 번째 알림</small><b>D+{{ T2 }}</b>
+      <p><span>받는 고객</span>아직 안 온 고객과 첫 방문에 이어서 산 고객</p></div>
+    <div class="rule"><small>그 이후</small><b>자동 재방문 알림</b>
+      <p><span>받는 고객</span>D+{{ T2 }}까지 안 온 고객</p></div>
+  </div>
+</div>
+
+<div class="card" id="cohort">
+  <div class="card-head"><div><h3>월별 코호트 리텐션</h3></div>
+    <span class="tag accent">다음 달 평균 {{ S.m1_ret|pct(1) }} · 3개월째 {{ S.m3_ret|pct(1) }}</span></div>
+  <div style="overflow-x:auto">
+  <table class="heat">
+    <tr><th></th>{% for a in range(12) %}<th>M{{ a }}</th>{% endfor %}</tr>
+    {% for c in J.cohorts %}
+    <tr><th class="row">{{ c.label }} · {{ c.size }}명</th>
+      {% for v in c.cells %}
+        {% if v is none %}<td class="na"></td>
+        {% elif loop.first %}<td style="background:#EEF2FF; color:var(--muted)">100%</td>
+        {% else %}{% set a = [v / 0.25, 1]|min %}
+          <td title="{{ c.label }} 코호트 · M{{ loop.index0 }} · {{ '%.1f'|format(v*100) }}%"
+              style="background: rgba(91,124,250,{{ '%.3f'|format(0.06 + 0.8*a) }}); color: {{ '#fff' if a > 0.6 else '#1F2533' }}">{{ (v*100)|round|int }}%</td>
+        {% endif %}
+      {% endfor %}</tr>
+    {% endfor %}
+  </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const weekly = {{ J.weekly|tojson }}, T = {{ triggers|list|tojson }};
+  const muted = "#8B94A7", grid = "#EFF2F8", accent = "#5B7CFA";
+  Chart.defaults.font.family = "Pretendard, system-ui, sans-serif"; Chart.defaults.color = muted;
+  // 리마인드 발송일에 세로 점선: 막대 i 는 첫 구매 후 7i+1 ~ 7i+7일이므로 D일의 위치는 d/7 - 0.5
+  const triggerLines = { id: "triggers", afterDatasetsDraw(c) {
+    const { ctx, chartArea: a, scales: { x } } = c;
+    ctx.save(); ctx.setLineDash([4, 4]); ctx.strokeStyle = "#E8704A"; ctx.lineWidth = 1.5; ctx.fillStyle = "#E8704A";
+    ctx.font = "600 11px Pretendard, sans-serif"; ctx.textAlign = "left";
+    T.forEach(d => { const px = x.getPixelForValue(d / 7 - 0.5); ctx.beginPath(); ctx.moveTo(px, a.top); ctx.lineTo(px, a.bottom); ctx.stroke();
+      ctx.fillText("D+" + d, px + 4, a.top + 12); });
+    ctx.restore(); } };
+  new Chart(document.getElementById("weekly"), {
+    type: "bar", plugins: [triggerLines],
+    data: { labels: weekly.map((_, i) => (i + 1) + "주"), datasets: [{ data: weekly, backgroundColor: weekly.map((_, i) => i === 0 ? "#2DBE9F" : accent),
+      borderRadius: 4, borderSkipped: "bottom", maxBarThickness: 22 }] },
+    options: { maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { title: i => "첫 구매 후 " + i[0].label + "차",
+        label: i => "그 주에 두 번째 구매 " + (i.raw * 100).toFixed(1) + "%" } } },
+      scales: { x: { grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true, autoSkipPadding: 6 } },
+                y: { min: 0, grid: { color: grid }, border: { display: false }, ticks: { callback: v => Math.round(v * 100) + "%" } } } }
+  });
+</script>
+{% endblock %}

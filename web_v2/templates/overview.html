@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}Executive 요약{% endblock %}
+{% block crumb %}{% endblock %}
+{% block heading %}Executive 요약{% endblock %}
+{% block content %}
+
+<div class="card">
+  <div class="card-head"><div><h3>AARRR로 본 고객 여정: 어디가 가장 약한가</h3></div>
+    <a class="btn" href="{{ url_for('journey') }}">여정·퍼널 자세히 →</a></div>
+  <div class="aarrr">
+    <div class="stage" style="--sc:#8B94A7">
+      <div class="st-h"><span class="st-l">A</span>Acquisition · 획득</div>
+      <div class="st-v">{{ S.annual_new|num }}명</div>
+      <div class="st-m">2019년 첫 구매 고객</div>
+      <div class="st-n">마케팅비를 더 써도 첫 구매는 늘지 않음 · p={{ '%.2f'|format(S.p_new) }}</div>
+      <span class="tag">퍼포먼스 영역</span>
+    </div>
+    <a class="stage leak" style="--sc:var(--bad)" href="{{ url_for('journey') }}">
+      <div class="st-h"><span class="st-l">A</span>Activation · 정착</div>
+      <div class="st-v">{{ S.conv90|pct(1) }}</div>
+      <div class="st-m">첫 구매 후 90일 안 두 번째 구매율</div>
+      <div class="st-n">D+30까지는 {{ J.c30|pct(1) }}</div>
+      <span class="tag High">북극성 지표</span>
+    </a>
+    <a class="stage" style="--sc:var(--mint)" href="{{ url_for('journey') }}#cohort">
+      <div class="st-h"><span class="st-l">R</span>Retention · 유지</div>
+      <div class="st-v">{{ S.m1_ret|pct(1) }}</div>
+      <div class="st-m">첫 구매 다음 달 재구매율</div>
+      <div class="st-n">3개월째 {{ S.m3_ret|pct(1) }}</div>
+      <span class="tag peach">개선 대상</span>
+    </a>
+    <div class="stage" style="--sc:var(--accent)">
+      <div class="st-h"><span class="st-l">R</span>Revenue · 수익</div>
+      <div class="st-v">{{ S.mkt_ratio|pct }}</div>
+      <div class="st-m">매출 대비 마케팅비</div>
+      <div class="st-n">평균 하루 마케팅비 {{ S.spend_day|money }}를 더 쓴 날 매출 +{{ S.rev_per_day|money }}</div>
+      <span class="tag peach">효율 낮음</span>
+    </div>
+    <div class="stage na" style="--sc:#C9CED9">
+      <div class="st-h"><span class="st-l">R</span>Referral · 추천</div>
+      <div class="st-v">—</div>
+      <div class="st-m">추천으로 들어온 고객 비율</div>
+      <div class="st-n">추천 코드·공유 이벤트 수집 필요</div>
+      <span class="tag">측정 불가</span>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-head"><div><h3>Vanity vs Actionable 지표 <span class="help" tabindex="0" aria-label="용어 설명">?<span class="tip"><b>Vanity</b> 커 보이지만 무엇을 해야 할지 알려 주지 않는 숫자<br><b>Actionable</b> 바꾸면 결과가 달라져 행동으로 이어지는 숫자</span></span></h3></div></div>
+  <div class="vgrid">
+    <div class="vpanel"><span class="tag vt">Vanity</span><b>월 매출</b>
+      <div class="vchart"><canvas id="v_rev" aria-label="2019년 월 매출"></canvas></div></div>
+    <div class="vpanel"><span class="tag mint">Actionable</span><b>첫 구매 카테고리별 90일 두 번째 구매율</b>
+      <div class="vchart"><canvas id="v_conv" aria-label="첫 구매 카테고리별 90일 두 번째 구매율"></canvas></div></div>
+  </div>
+</div>
+
+<div class="grid g21">
+  <div class="card">
+    <div class="card-head"><div><h3>가치 × 위험 매트릭스</h3></div>
+      <span class="tag guard">주황 테두리 = 고가치 위험 고객</span></div>
+    {% set ns = namespace(mx=0) %}
+    {% for row in matrix %}{% for c in row.cells %}{% if c.rev > ns.mx %}{% set ns.mx = c.rev %}{% endif %}{% endfor %}{% endfor %}
+    <table class="matrix">
+      <tr><th></th>{% for r in risks %}<th>{{ r }} 위험</th>{% endfor %}</tr>
+      {% for row in matrix %}
+      <tr><th class="row"><span class="tier {{ row.tier }}">{{ row.tier }}</span></th>
+        {% for c in row.cells %}
+          {% set a = (c.rev / ns.mx) ** 0.5 if ns.mx else 0 %}
+          <td class="{{ 'focus' if row.tier in ['VIP','Diamond','Platinum','Gold'] and c.risk=='High' }}"
+              style="background: rgba(91,124,250,{{ '%.3f'|format(0.05 + 0.75*a) }}); color: {{ '#fff' if a > 0.6 else '#1F2533' }}">
+            <a href="{{ url_for('actions', tier=row.tier, risk=c.risk) }}"><b>{{ c.n }}명</b><span>${{ (c.rev/1000)|num }}K</span></a></td>
+        {% endfor %}</tr>
+      {% endfor %}
+    </table>
+    <p class="sub" style="margin-top:10px">고가치 위험 고객 {{ S.guard_n }}명의 2019년 매출 ${{ (S.guard_rev/1000)|round|int }}K<br>
+      이 중 {{ S.guard_one|pct }}가 <b>한 번 크게 사고</b> 마지막 구매 후 중앙값 {{ S.guard_recency|int }}일째 돌아오지 않았고, {{ S.guard_bulk|pct }}가 대량 주문 고객입니다.</p>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><div><h3>운영 규칙: 누구에게 무엇을</h3></div></div>
+    {% set R = {} %}{% for r in rules %}{% set _ = R.update({r.action_rule_id: r}) %}{% endfor %}
+    <div class="steps">
+      <div class="step" style="--ss: var(--mint-soft); --sc: #168A72"><div class="no">1</div>
+        <div><b>Activation · 신규 온보딩</b><span>D+7 · D+30 첫 구매 카테고리 인기·신상품 알림 · 할인 없음</span></div>
+        <div class="n">{{ R[1].n }}명</div></div>
+      <div class="step" style="--ss: var(--peach-soft); --sc: var(--guard)"><div class="no">2</div>
+        <div><b>Revenue · 고가치 고객 윈백</b><span>담당자가 직접 · 재주문·대량 주문 전담 상담 · 개별 혜택 · 이 중 신규 {{ S.guard_new }}명은 1번으로</span></div>
+        <div class="n">{{ R[2].n + R[3].n }}명</div></div>
+      <div class="step" style="--ss: var(--accent-soft); --sc: var(--accent)"><div class="no">3</div>
+        <div><b>Retention · 자동 재방문 알림</b><span>평소 구매 간격의 1.5배가 지나면 대표 카테고리 재입고·신상품 알림 · 할인 없음</span></div>
+        <div class="n">{{ R[4].n + R[5].n + R[6].n }}명</div></div>
+      <div class="step" style="--ss: #F5F6F9; --sc: var(--muted)"><div class="no">4</div>
+        <div><b>유지 · 관계 유지</b><span>위험이 낮은 고객 · 월 1회 뉴스레터 · 할인 없음</span></div>
+        <div class="n">{{ R[7].n }}명</div></div>
+    </div>
+    <a class="btn primary" style="margin-top:14px" href="{{ url_for('actions') }}">실행 명단 보기 →</a>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const V = {{ V|tojson }};
+  const grey = "#B7BECC", mint = "#2DBE9F", muted = "#8B94A7", grid = "#EFF2F8";
+  Chart.defaults.font.family = "Pretendard, system-ui, sans-serif"; Chart.defaults.color = muted; Chart.defaults.font.size = 11;
+  const base = { maintainAspectRatio: false, plugins: { legend: { display: false } } };
+  new Chart(document.getElementById("v_rev"), { type: "line",
+    data: { labels: V.labels, datasets: [{ data: V.rev, borderColor: grey, borderWidth: 2, pointRadius: 0, pointHoverRadius: 5,
+      fill: true, backgroundColor: "rgba(183,190,204,.15)", tension: 0 }] },
+    options: { ...base, interaction: { mode: "index", intersect: false },
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: i => "월 매출 $" + i.raw.toLocaleString() + "K" } } },
+      scales: { x: { grid: { display: false }, ticks: { maxRotation: 0, autoSkipPadding: 8 } },
+                y: { min: 0, grid: { color: grid }, border: { display: false }, ticks: { callback: v => "$" + v + "K", maxTicksLimit: 4 } } } } });
+  new Chart(document.getElementById("v_conv"), { type: "bar",
+    data: { labels: V.conv.map(c => c.m), datasets: [{ data: V.conv.map(c => c.rate), backgroundColor: mint,
+      borderRadius: 4, borderSkipped: "bottom", maxBarThickness: 18 }] },
+    options: { ...base,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { title: i => i[0].label + " 첫 구매 고객 " + V.conv[i[0].dataIndex].n + "명",
+        label: i => "90일 안 두 번째 구매 " + (i.raw * 100).toFixed(1) + "% (±" + (V.conv[i.dataIndex].ci * 100).toFixed(1) + "%p)" } } },
+      scales: { x: { grid: { display: false }, ticks: { maxRotation: 0, autoSkipPadding: 4 } },
+                y: { min: 0, max: 0.6, grid: { color: grid }, border: { display: false }, ticks: { callback: v => Math.round(v * 100) + "%", stepSize: 0.2 } } } } });
+</script>
+{% endblock %}

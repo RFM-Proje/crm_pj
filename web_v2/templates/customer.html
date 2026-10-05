@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}Customer 360{% endblock %}
+{% block crumb %}{% endblock %}
+{% block heading %}Customer 360{% endblock %}
+{% block content %}
+<form class="card" action="{{ url_for('customer') }}" style="display:flex; gap:12px; align-items:center; padding:14px 18px">
+  <div class="ac-wrap" style="flex:1"><input name="q" data-ac value="{{ q or '' }}" placeholder="가명 또는 고객ID 입력" autocomplete="off"
+         class="field"></div>
+  <button class="btn primary" type="submit">조회</button>
+  <a class="btn" href="{{ url_for('customer') }}">가치위험 1순위 보기</a>
+</form>
+
+{% if c is none %}
+<div class="card"><p class="statement">'{{ q }}'에 해당하는 고객이 없습니다. 이름 일부나 USER_0001 형식의 ID로 다시 검색해 주세요.</p></div>
+{% else %}
+{% set auto_msg = "평소 구매 간격을 넘기면 " ~ c['top_category'] ~ " 재입고·신상품 소식과 관련 상품을 앱 푸시·이메일로 자동으로 보냅니다. 할인은 없습니다." %}
+{% set offers = {
+  "NEW_LOW_COST_TEST": "D+7과 D+30에 " ~ c['top_category'] ~ " 인기·신상품을 이메일·앱 푸시로 보냅니다. 할인은 없습니다.",
+  "HIGH_VALUE_RETENTION": ("담당자가 개별 연락해 지난 주문을 그대로 다시 주문할 수 있게 돕고, 대량 주문 전담 상담과 전용 혜택을 드립니다." if c['bulk']
+                           else "담당자가 개별 연락해 첫 구매 카테고리 신상품을 제안하고 전용 혜택을 드립니다."),
+  "TARGETED_RETENTION": ("지난 주문 재주문 링크와 대량 주문 상담 예약을 담당자 이름의 이메일로 보내고 개별 혜택을 드립니다." if c['bulk']
+                         else "담당자 이름의 이메일로 " ~ ("Nest-USA" if c['top_category'] == "Nest-USA" else c['top_category'] ~ "·Nest-USA") ~ " 관련 기기·신상품과 개별 혜택을 보냅니다."),
+  "LOW_COST_REACTIVATION": auto_msg, "LOYALTY_CROSSSELL": auto_msg, "CATEGORY_REMINDER": auto_msg,
+  "MAINTAIN_MONITOR": "지금처럼 기본 관리를 유지하고, 과도한 할인 없이 구매 주기만 지켜봅니다." } %}
+{% set gap = c['avg_gap_days'] %}{% set rec = c['recency'] %}
+{# 구매 주기는 간격이 2번 이상(구매일 3일 이상)일 때만 의미가 있다 #}
+{% set has_cycle = c['purchase_days'] >= 3 and gap == gap %}
+
+{% if c['signal_conflict'] %}
+<div class="insight" style="border-left-color: var(--lemon)"><div class="ico" style="background:var(--lemon-soft); color:var(--warn)">!</div><div>
+  <b>주기 경보 · 담당자 확인</b>
+  <p>모델 위험 {{ c['relative_risk_grade'] }} · 평소 {{ gap|round|int }}일 주기 · 마지막 구매 후 <b>{{ rec }}일째</b></p></div></div>
+{% endif %}
+
+<div class="card">
+  <div class="hero">
+    <div class="avatar">{{ c['name'][:1] }}</div>
+    <div>
+      <h2>{{ c['name'] }} <small style="font-size:14px; color:var(--muted); font-weight:500">{{ c['customer_id'] }}</small></h2>
+      <div class="meta">{{ c['gender'] }} · {{ c['region'] }} · 가입 {{ c['tenure'] }}개월 · 첫 구매 {{ c['first_day'].strftime('%Y-%m-%d') }} · 마지막 구매 {{ c['last_day'].strftime('%Y-%m-%d') }}</div>
+      <div class="badges">
+        <span class="tier {{ c['rfmp_tier'] }}">{{ c['rfmp_tier'] }}</span>
+        <span class="tag {{ c['relative_risk_grade'] }}">이탈 위험 {{ c['relative_risk_grade'] }}</span>
+        <span class="tag mint">여정 · {{ c['journey_stage'] }}</span>
+      </div>
+    </div>
+    <div style="text-align:right">
+      <div class="sub" style="margin:0">2019년 매출</div>
+      <div class="big-num">{{ c['revenue_ex_gst']|money }}</div>
+    </div>
+  </div>
+</div>
+
+<div class="grid g2">
+  <div class="card">
+    <h3>가치와 위험, 한눈에</h3>
+    <div style="margin-top:16px"><div class="row-kv"><span>RFMP 가치 순위</span><b>상위 {{ (1 - c['rfmp_value_percentile'])|pct }}</b></div>
+      <div class="meter"><i style="width: {{ (c['rfmp_value_percentile']*100)|round(1) }}%"></i></div></div>
+    <div style="margin-top:14px"><div class="row-kv"><span>이탈 위험 순위</span><b>{{ c['relative_risk_grade'] }} · {{ c['relative_risk_percentile']|pct }}</b></div>
+      <div class="meter risk"><i style="width: {{ (c['relative_risk_percentile']*100)|round(1) }}%"></i></div></div>
+    <div style="margin-top:12px">
+      <div class="row-kv"><span>매출 순위</span><b>상위 {{ c['revenue_top_pct']|pct(1) }}</b></div>
+      <div class="row-kv"><span>주로 사는 카테고리</span><b>{{ c['top_category'] }}</b></div>
+      <div class="row-kv"><span>2019년 구매한 날</span><b>{{ c['purchase_days'] }}일</b></div>
+      <div class="row-kv"><span>마지막 구매 후</span><b style="{{ 'color:var(--bad)' if has_cycle and rec > gap * 1.5 }}">{{ rec }}일{% if has_cycle %} · 평소 {{ gap|round|int }}일 주기{% endif %}</b></div>
+    </div>
+  </div>
+
+  <div class="card action-box">
+    <div class="code">추천 캠페인 · {{ c['campaign_stage'] }}</div>
+    <h3>{{ c['campaign'] }}</h3>
+    <p>{{ offers[c['action_code']] }}</p>
+    <div class="grid g2" style="margin-top:16px; gap:12px">
+      <div class="mini"><small>다음 발송 · 2019-12-31 기준</small><b style="font-size:16px">{{ c['next_send'] }}</b></div>
+      <div class="mini"><small>성공 지표</small><b style="font-size:16px">{{ '보류군 대비 90일 두 번째 구매율' if c['action_rule_id'] == 1 else ('수신 거부율 · 위험 등급 유지' if c['action_rule_id'] == 7 else '보류군 대비 90일 재구매율') }}</b></div>
+    </div>
+    {% if c['bulk'] %}<div class="mini" style="margin-top:12px; background:var(--lilac-soft)"><small>함께 받는 시즌 캠페인</small>
+      <b style="font-size:16px">연말 재주문 · 10월 마지막 주 이메일</b></div>{% endif %}
+  </div>
+</div>
+{% endif %}
+{% endblock %}
