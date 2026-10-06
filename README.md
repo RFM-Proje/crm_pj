@@ -4,7 +4,7 @@
 ### 고객가치(RFM-P) × 이탈 위험으로 "누구부터, 무엇을 보낼지" 정하고, 두 번째 구매를 만드는 CRM 분석 · 운영 대시보드
 
 [![SAS](https://img.shields.io/badge/SAS-Viya-1B7F9C?style=for-the-badge&logo=sas&logoColor=white)](https://www.sas.com/)
-[![Python](https://img.shields.io/badge/Python-3.12-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/Python-3.14-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![scikit-learn](https://img.shields.io/badge/scikit--learn-F7931E?style=for-the-badge&logo=scikitlearn&logoColor=white)](https://scikit-learn.org/)
 [![pandas](https://img.shields.io/badge/pandas-150458?style=for-the-badge&logo=pandas&logoColor=white)](https://pandas.pydata.org/)
 [![Flask](https://img.shields.io/badge/Flask-000000?style=for-the-badge&logo=flask&logoColor=white)](https://flask.palletsprojects.com/)
